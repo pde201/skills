@@ -32,8 +32,15 @@ Before closing any child implementation ticket:
 
 ### 4. PRD Walkthrough and Closure
 Once all child issues are closed:
-- [ ] Compile a comprehensive walkthrough report.
-- [ ] Save the responsive HTML walkthrough in `docs/walkthrough.html`.
+- [ ] Compile a comprehensive walkthrough report in `walkthrough.md`.
+- [ ] Run the HTML compiler to auto-generate the responsive walkthrough layout:
+  ```bash
+  node scripts/generate-walkthrough.js walkthrough.md docs/walkthrough.html
+  ```
+- [ ] Run the PRD verification script (checks staged assets, open children status, code compiles, and clean git state):
+  ```bash
+  bash scripts/verify-prd-closing.sh <parent_prd_issue_id>
+  ```
 - [ ] Stage/commit the `docs/walkthrough.html` file to Git.
 - [ ] Paste the markdown version of the walkthrough directly as the comment body of the closed parent PRD issue.
 - [ ] Close the parent PRD issue.

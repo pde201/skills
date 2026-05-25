@@ -1,0 +1,4 @@
+interface:
+  display_name: "Create HTML Artifacts"
+  short_description: "Make dense work readable as browser artifacts"
+  default_prompt: "Use $create-html-artifacts to turn this dense work product into a self-contained HTML artifact."

@@ -1,0 +1,26 @@
+{
+  "name": "prd-lifecycle-skill",
+  "version": "1.0.0",
+  "description": "An agent skill to manage parent PRD and child implementation issue lifecycles with verification hooks and walkthrough comment generators.",
+  "main": "SKILL.md",
+  "bin": {
+    "prd-lifecycle-skill": "bin/install.js"
+  },
+  "files": [
+    "bin/",
+    "SKILL.md",
+    "scripts"
+  ],
+  "scripts": {
+    "verify": "bash scripts/verify-prd-closing.sh"
+  },
+  "keywords": [
+    "antigravity",
+    "agent-skill",
+    "prd-lifecycle",
+    "triage",
+    "matt-pocock-skills"
+  ],
+  "author": "Carbon Clear Team",
+  "license": "MIT"
+}

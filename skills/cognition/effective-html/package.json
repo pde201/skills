@@ -1,6 +1,6 @@
 {
   "name": "@acuity-skills/effective-html",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Install the effective-html skill for any SKILL.md-compatible agent or skills directory.",
   "bin": {
     "acuity-effective-html": "bin/install.js"
@@ -9,9 +9,13 @@
     "bin/",
     "create-html-artifacts/",
     "evals/",
+    "samples/",
     "README.md",
     "install.sh"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=16"
   },

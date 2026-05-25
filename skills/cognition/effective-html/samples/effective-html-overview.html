@@ -1,0 +1,557 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Effective HTML Skill — Sample</title>
+<style>
+/* Thariq HTML Effectiveness theme — extra-dense variant (https://thariqs.github.io/html-effectiveness/) */
+:root {
+  --ivory: #FAF9F5;
+  --slate: #141413;
+  --clay: #D97757;
+  --clay-d: #B85C3E;
+  --oat: #E3DACC;
+  --olive: #788C5D;
+  --rust: #B04A3F;
+  --g50: #F0EEE6;
+  --g200: #D1CFC5;
+  --g500: #87867F;
+  --g700: #3D3D3A;
+  --paper: #FDFCF9;
+  --serif: ui-serif, Georgia, "Times New Roman", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  --radius: 7px;
+  --gap: 6px;
+  --pad: 8px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--sans);
+  font-size: 12.5px;
+  line-height: 1.38;
+  background: var(--ivory);
+  color: var(--g700);
+  padding: 14px 10px 28px;
+  -webkit-font-smoothing: antialiased;
+}
+.page { max-width: 1080px; margin: 0 auto; }
+a { color: var(--clay); }
+button, input, select, textarea { font: inherit; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--clay);
+  outline-offset: 1px;
+}
+header { margin-bottom: 12px; max-width: 720px; }
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--g500);
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.eyebrow::before { content: ""; width: 12px; height: 1px; background: var(--clay); }
+h1 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: clamp(19px, 2.6vw, 24px);
+  line-height: 1.1;
+  color: var(--slate);
+  letter-spacing: -0.01em;
+  margin-bottom: 4px;
+}
+.lede { font-size: 12.5px; color: var(--g700); max-width: 640px; }
+.lede strong { color: var(--slate); }
+.muted { font-size: 11.5px; color: var(--g500); }
+section { margin-bottom: 14px; scroll-margin-top: 8px; }
+.sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  margin-bottom: 3px;
+}
+.sec-head .num {
+  font-family: var(--mono);
+  font-size: 9px;
+  background: var(--oat);
+  color: var(--slate);
+  padding: 1px 5px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+.sec-head h2 {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 16px;
+  color: var(--slate);
+  letter-spacing: -0.01em;
+}
+.sec-intro { font-size: 12px; color: var(--g500); max-width: 600px; margin-bottom: 6px; }
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: var(--gap);
+  margin-bottom: 12px;
+}
+@media (max-width: 760px) { .summary { grid-template-columns: repeat(2, 1fr); } }
+.summary .cell, .panel, .card {
+  background: var(--paper);
+  border: 1px solid var(--g200);
+  border-radius: var(--radius);
+}
+.summary .cell { padding: 6px 8px; }
+.summary .k {
+  font-family: var(--mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--g500);
+  margin-bottom: 1px;
+}
+.summary .v { font-size: 12px; color: var(--slate); font-weight: 600; }
+.summary .v.accent { color: var(--clay); }
+.panel { padding: var(--pad) 9px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--gap); }
+.stack { display: grid; gap: var(--gap); }
+h3 { font-family: var(--serif); font-weight: 500; font-size: 13px; color: var(--slate); }
+table.data {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--paper);
+  border: 1px solid var(--g200);
+  border-radius: var(--radius);
+  overflow: hidden;
+  font-size: 11.5px;
+}
+table.data th, table.data td {
+  padding: 4px 7px;
+  border-bottom: 1px solid var(--g200);
+  text-align: left;
+  vertical-align: top;
+}
+table.data th {
+  background: var(--g50);
+  font-family: var(--mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--g500);
+}
+table.data tr:last-child td { border-bottom: 0; }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--g200);
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--slate);
+  background: var(--paper);
+  text-decoration: none;
+}
+.chip .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.chip.safe, .chip.low { background: rgba(120,140,93,0.10); border-color: rgba(120,140,93,0.4); }
+.chip.safe .dot, .chip.low .dot { background: var(--olive); }
+.chip.medium, .chip.med { background: var(--oat); }
+.chip.medium .dot, .chip.med .dot { background: #B89B6E; }
+.chip.attention, .chip.high { background: rgba(217,119,87,0.12); border-color: rgba(217,119,87,0.5); }
+.chip.attention .dot, .chip.high .dot { background: var(--clay); }
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); }
+@media (max-width: 640px) { .compare { grid-template-columns: 1fr; } }
+.compare article { background: var(--paper); border: 1px solid var(--g200); border-radius: var(--radius); padding: 7px 8px; }
+.compare ul { margin: 4px 0 0; padding-left: 14px; font-size: 11.5px; }
+.compare li { margin: 1px 0; }
+.diagram {
+  background: var(--paper);
+  border: 1px solid var(--g200);
+  border-radius: var(--radius);
+  padding: 6px;
+  overflow-x: auto;
+}
+.diagram svg { display: block; min-width: 560px; width: 100%; height: auto; color: var(--slate); }
+.diagram text { font-family: var(--mono); font-size: 10px; fill: currentColor; }
+.diagram .box { fill: var(--paper); stroke: currentColor; }
+.caption { font-size: 10.5px; color: var(--g500); margin-top: 4px; }
+.milestones { display: flex; flex-direction: column; }
+.milestone {
+  display: grid;
+  grid-template-columns: 78px 18px 1fr;
+  gap: 0 8px;
+}
+.milestone .when {
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--g500);
+  padding-top: 1px;
+}
+.milestone .dot-col { display: flex; flex-direction: column; align-items: center; }
+.milestone .dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--paper); border: 2px solid var(--clay); margin-top: 2px;
+}
+.milestone .line { width: 1.5px; flex: 1; background: var(--g200); margin: 2px 0; }
+.milestone:last-child .line { display: none; }
+.milestone .body { padding-bottom: 8px; }
+.milestone .body p { font-size: 11.5px; color: var(--g500); margin-top: 1px; max-width: 520px; }
+.tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  background: var(--g50);
+  border: 1px solid var(--g200);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--g700);
+}
+details {
+  background: var(--paper);
+  border: 1px solid var(--g200);
+  border-radius: var(--radius);
+  padding: 6px 8px;
+  font-size: 11.5px;
+}
+summary { cursor: pointer; font-weight: 600; color: var(--slate); }
+details[open] summary { margin-bottom: 4px; }
+.toolbar { display: flex; gap: 4px; flex-wrap: wrap; margin: 5px 0; align-items: center; }
+.toolbar.sticky {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--ivory); padding: 5px 0;
+  border-bottom: 1px solid var(--g200); margin-bottom: 6px;
+}
+.toolbar .hint { font-family: var(--mono); font-size: 9px; color: var(--g500); }
+.btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  border-radius: 999px;
+  padding: 4px 9px;
+  cursor: pointer;
+  border: 1px solid var(--slate);
+  background: var(--slate);
+  color: var(--ivory);
+}
+.btn.ghost { background: transparent; color: var(--slate); border-color: var(--g200); }
+pre, code { font-family: var(--mono); }
+pre.block {
+  overflow-x: auto;
+  background: var(--slate);
+  color: #E8E6DC;
+  border-radius: var(--radius);
+  padding: 7px 9px;
+  font-size: 10.5px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+pre.soft {
+  background: var(--g50);
+  border: 1px solid var(--g200);
+  color: var(--g700);
+  border-radius: var(--radius);
+  padding: 7px 9px;
+  font-size: 10.5px;
+  line-height: 1.42;
+  white-space: pre-wrap;
+}
+.tabs .tabbar { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 5px; }
+.tabs .tabbar button {
+  font-family: var(--mono);
+  font-size: 10px;
+  border: 1px solid var(--g200);
+  background: var(--paper);
+  color: var(--g700);
+  border-radius: 999px;
+  padding: 3px 8px;
+  cursor: pointer;
+}
+.tabs .tabbar button[aria-selected="true"] {
+  background: var(--slate);
+  color: var(--ivory);
+  border-color: var(--slate);
+}
+.search-bar { margin-bottom: 5px; }
+.search-bar input {
+  width: 100%;
+  padding: 4px 7px;
+  border: 1px solid var(--g200);
+  border-radius: 5px;
+  background: var(--paper);
+  font-size: 11.5px;
+}
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); border: 0;
+}
+.layout-2 {
+  display: grid;
+  grid-template-columns: 148px 1fr;
+  gap: 10px;
+  align-items: start;
+}
+@media (max-width: 760px) { .layout-2 { grid-template-columns: 1fr; } }
+nav.jump { position: sticky; top: 6px; display: grid; gap: 2px; }
+nav.jump a {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--g500);
+  text-decoration: none;
+  padding: 1px 0;
+}
+nav.jump a:hover { color: var(--slate); }
+.pr-head {
+  border: 1px solid var(--g200);
+  border-radius: var(--radius);
+  padding: 9px 10px;
+  background: var(--paper);
+  margin-bottom: 10px;
+  max-width: none;
+}
+.file-card {
+  border: 1px solid var(--g200);
+  border-radius: var(--radius);
+  background: var(--paper);
+  overflow: hidden;
+  margin-bottom: 6px;
+  scroll-margin-top: 8px;
+}
+.file-head {
+  padding: 5px 8px;
+  border-bottom: 1px solid var(--g50);
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.file-path { font-family: var(--mono); font-size: 11px; color: var(--slate); }
+.file-note { padding: 5px 8px; font-size: 11.5px; color: var(--g500); }
+.risk-tag {
+  font-family: var(--mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-weight: 600;
+}
+.risk-tag.attention { background: rgba(217,119,87,0.15); color: var(--clay); }
+.risk-tag.medium { background: var(--oat); color: #7A6A4F; }
+.risk-tag.safe { background: rgba(120,140,93,0.15); color: var(--olive); }
+.diff { background: var(--slate); font-family: var(--mono); font-size: 10px; line-height: 1.5; overflow-x: auto; }
+.diff-row { display: grid; grid-template-columns: 32px 12px 1fr; padding: 0 6px 0 0; white-space: pre; }
+.diff-row .ln { text-align: right; padding-right: 6px; color: var(--g500); }
+.diff-row .code { color: #E8E6DC; }
+.diff-row.add { background: rgba(120,140,93,0.15); }
+.diff-row.add .mark { color: var(--olive); }
+.diff-row.del { background: rgba(176,74,63,0.15); }
+.diff-row.del .mark { color: var(--rust); }
+.cols {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) 1fr;
+  gap: 10px;
+  align-items: start;
+}
+@media (max-width: 820px) { .cols { grid-template-columns: 1fr; } }
+.field { display: grid; gap: 2px; margin-bottom: 5px; }
+.field label { font-size: 11px; font-weight: 600; color: var(--slate); }
+.field input, .field select, .field textarea {
+  width: 100%;
+  border: 1px solid var(--g200);
+  border-radius: 5px;
+  padding: 4px 6px;
+  background: var(--paper);
+  font-size: 11.5px;
+}
+.field textarea { min-height: 42px; resize: vertical; }
+.field-check { display: flex; align-items: center; gap: 6px; margin-bottom: 5px; font-size: 11.5px; }
+.field-check input { width: auto; }
+.warn {
+  display: none;
+  font-size: 11px;
+  padding: 4px 6px;
+  border-radius: 5px;
+  border: 1px solid rgba(217,119,87,0.4);
+  background: rgba(217,119,87,0.1);
+  color: var(--clay-d);
+}
+.warn.visible { display: block; }
+.preview-title {
+  font-family: var(--serif);
+  font-size: 15px;
+  margin-bottom: 5px;
+}
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); border: 0;
+}
+@media print {
+  body { padding: 0; }
+  .toolbar, .tabbar, .search-bar, nav.jump { display: none; }
+  .tabs [hidden] { display: block !important; }
+}
+
+</style>
+</head>
+<body>
+<main class="page">
+<header>
+<p class="eyebrow">Acuity cognition · sample</p>
+<h1>Effective HTML Skill Overview</h1>
+<p class="lede"><strong>TL;DR:</strong> Package <code>effective-html</code> ships skill <code>create-html-artifacts</code> — single-file browser artifacts when layout beats Markdown.</p>
+</header>
+<section class="summary" aria-label="Summary">
+<div class="cell"><div class="k">Package</div><div class="v">effective-html</div></div>
+<div class="cell"><div class="k">Skill</div><div class="v accent">create-html-artifacts</div></div>
+<div class="cell"><div class="k">Category</div><div class="v">Cognition</div></div>
+<div class="cell"><div class="k">Output</div><div class="v">One .html</div></div>
+</section>
+<section>
+<div class="sec-head"><span class="num">01</span><h2>When to use</h2></div>
+<p class="sec-intro">Comparison, flow, risk tables, editors — not linear prose or Git-tracked specs.</p>
+<div class="compare">
+<article><h3>Markdown</h3><ul><li>Short linear prose</li><li>Collaborative diffs</li><li>Plain-text consumers</li></ul></article>
+<article><h3>HTML artifact</h3><ul><li>Side-by-side options</li><li>Timelines &amp; SVG flows</li><li>Copy/export controls</li></ul></article>
+</div>
+</section>
+<section>
+<div class="sec-head"><span class="num">02</span><h2>Workflow</h2></div>
+<div class="diagram">
+<svg viewBox="0 0 820 120" role="img" aria-labelledby="wf-title wf-desc">
+<title id="wf-title">Workflow</title>
+<desc id="wf-desc">Reader task to open artifact in browser</desc>
+<defs><marker id="arrow-a" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="currentColor"/></marker></defs>
+<g class="box"><rect x="8" y="34" width="118" height="52" rx="7"/><rect x="158" y="34" width="118" height="52" rx="7"/><rect x="308" y="34" width="118" height="52" rx="7"/><rect x="458" y="34" width="118" height="52" rx="7"/><rect x="608" y="34" width="118" height="52" rx="7"/><rect x="758" y="34" width="54" height="52" rx="7"/></g>
+<text x="67" y="64" text-anchor="middle">Reader task</text><text x="217" y="64" text-anchor="middle">Pick shape</text><text x="367" y="64" text-anchor="middle">base.html</text><text x="517" y="64" text-anchor="middle">Build</text><text x="667" y="64" text-anchor="middle">Validate</text><text x="785" y="64" text-anchor="middle">Open</text>
+<g fill="none" stroke="currentColor" marker-end="url(#arrow-a)"><path d="M128 60 H152"/><path d="M278 60 H302"/><path d="M428 60 H452"/><path d="M578 60 H602"/><path d="M728 60 H752"/></g>
+</svg>
+<p class="caption">Inline CSS/SVG/JS only unless user requests CDN.</p>
+</div>
+</section>
+<section>
+<div class="sec-head"><span class="num">03</span><h2>Examples</h2></div>
+<div class="tabs" data-tabs>
+<div class="tabbar" role="tablist" aria-label="Artifact examples">
+<button type="button" role="tab" aria-selected="true" data-tab="plan">Plan</button>
+<button type="button" role="tab" aria-selected="false" data-tab="review">Review</button>
+<button type="button" role="tab" aria-selected="false" data-tab="decision">Decision</button>
+</div>
+<div class="panel" data-panel="plan"><h3>Implementation plan</h3><p class="sec-intro">Summary strip, milestones, data-flow SVG, risks, open questions.</p></div>
+<div class="panel" hidden data-panel="review"><h3>Code review</h3><p class="sec-intro">Severity chips, file cards, annotated diff, fix options.</p></div>
+<div class="panel" hidden data-panel="decision"><h3>Decision brief</h3><p class="sec-intro">Recommendation, options matrix, trade-offs, decision log export.</p></div>
+</div>
+</section>
+<section>
+<div class="sec-head"><span class="num">04</span><h2>Artifact families</h2></div>
+<div class="search-bar"><label class="sr-only" for="family-search">Filter families</label><input id="family-search" placeholder="Filter families…" aria-controls="family-table"></div>
+<table class="data" id="family-table"><thead><tr><th>Family</th><th>Structure</th><th>Affordances</th></tr></thead><tbody>
+<tr class="searchable-row"><td><strong>Plan</strong></td><td>Scope, milestones, flow, files</td><td>Timeline, diagram</td></tr>
+<tr class="searchable-row"><td><strong>Review</strong></td><td>Summary, file cards, findings</td><td>Severity chips, diff</td></tr>
+<tr class="searchable-row"><td><strong>Explainer</strong></td><td>TL;DR, modules, glossary</td><td>Tabs, collapsible depth</td></tr>
+<tr class="searchable-row"><td><strong>Editor</strong></td><td>Inputs, preview, output</td><td>Reset, copy/export</td></tr>
+</tbody></table>
+</section>
+<section>
+<div class="sec-head"><span class="num">05</span><h2>Risks</h2></div>
+<table class="data"><thead><tr><th>Risk</th><th>Impact</th><th>Mitigation</th></tr></thead><tbody>
+<tr><td>External CDNs</td><td>Offline break</td><td>Inline assets by default</td></tr>
+<tr><td>JS-only content</td><td>Bad screenshots</td><td>Progressive enhancement</td></tr>
+</tbody></table>
+</section>
+<section>
+<details><summary>Sources</summary>
+<ul class="muted" style="margin-top:6px;padding-left:18px"><li><code>create-html-artifacts/SKILL.md</code></li><li><a href="https://thariqs.github.io/html-effectiveness/">HTML Effectiveness gallery</a></li></ul>
+</details>
+<div class="toolbar"><button class="btn" type="button" data-copy="#handoff">Copy handoff</button><button class="btn ghost" type="button" onclick="window.print()">Print</button></div>
+<pre class="soft" id="handoff">Use create-html-artifacts when layout improves cognition. Install: npx --yes github:pde201/skills/skills/cognition/effective-html</pre>
+</section>
+</main>
+<script>
+async function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.style.position = "fixed";
+  textarea.style.top = "-1000px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
+
+document.querySelectorAll("[data-copy]").forEach((button) => {
+  button.addEventListener("click", async () => {
+    const target = document.querySelector(button.dataset.copy);
+    await copyText(target ? target.textContent.trim() : "");
+    const previous = button.textContent;
+    button.textContent = "Copied";
+    setTimeout(() => { button.textContent = previous; }, 1200);
+  });
+});
+
+function initTabs(root) {
+  const tabs = [...root.querySelectorAll("[data-tab]")];
+  const panels = [...root.querySelectorAll("[data-panel]")];
+  if (!tabs.length) return;
+
+  function selectTab(tab, focusTab = true) {
+    const id = tab.dataset.tab;
+    tabs.forEach((item) => {
+      const selected = item === tab;
+      item.setAttribute("aria-selected", String(selected));
+      item.tabIndex = selected ? 0 : -1;
+    });
+    panels.forEach((panel) => {
+      panel.hidden = panel.dataset.panel !== id;
+    });
+    if (focusTab) tab.focus({ preventScroll: true });
+  }
+
+  tabs.forEach((tab, index) => {
+    const id = tab.dataset.tab;
+    tab.id = `tab-${id}`;
+    tab.tabIndex = index === 0 ? 0 : -1;
+    tab.setAttribute("aria-controls", `panel-${id}`);
+    const panel = panels.find((item) => item.dataset.panel === id);
+    if (panel) {
+      panel.id = `panel-${id}`;
+      panel.setAttribute("role", "tabpanel");
+      panel.setAttribute("aria-labelledby", tab.id);
+    }
+    tab.addEventListener("click", () => selectTab(tab));
+    tab.addEventListener("keydown", (event) => {
+      const current = tabs.indexOf(tab);
+      if (event.key === "ArrowRight") {
+        event.preventDefault();
+        selectTab(tabs[Math.min(current + 1, tabs.length - 1)]);
+      }
+      if (event.key === "ArrowLeft") {
+        event.preventDefault();
+        selectTab(tabs[Math.max(current - 1, 0)]);
+      }
+    });
+  });
+  selectTab(tabs[0], false);
+}
+
+document.querySelectorAll("[data-tabs]").forEach(initTabs);
+
+document.getElementById("family-search")?.addEventListener("input", (event) => {
+  const query = event.target.value.toLowerCase().trim();
+  document.querySelectorAll(".searchable-row").forEach((row) => {
+    row.style.display = row.textContent.toLowerCase().includes(query) ? "" : "none";
+  });
+});
+</script>
+</body>
+</html>

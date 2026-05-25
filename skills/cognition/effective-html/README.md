@@ -26,6 +26,30 @@ It is useful for:
 - prompt, config, and workflow editors
 - meeting decks and decision briefs
 
+## Sample artifacts
+
+Reference HTML files live in [`samples/`](samples/). Theme follows the [HTML Effectiveness gallery](https://thariqs.github.io/html-effectiveness/) (dense layout).
+
+| Sample | Family | Open |
+| --- | --- | --- |
+| `effective-html-overview.html` | Explainer | `open samples/effective-html-overview.html` |
+| `code-review-sample.html` | Code review | `open samples/code-review-sample.html` |
+| `implementation-plan-sample.html` | Implementation plan | `open samples/implementation-plan-sample.html` |
+| `prompt-editor-sample.html` | Custom editor | `open samples/prompt-editor-sample.html` |
+
+Validate all samples:
+
+```bash
+python3 create-html-artifacts/scripts/check-html-artifact.py samples/*.html
+```
+
+Regenerate samples after editing `samples/he-dense-theme.css` or `samples/build-samples.py`:
+
+```bash
+python3 samples/build-samples.py
+python3 samples/build-samples.py --check   # CI: fail if HTML is stale
+```
+
 ## Recommended Install With skills.sh
 
 The easiest path is the `skills` CLI from [skills.sh](https://skills.sh). This installs the `create-html-artifacts` skill globally for your detected agent environment:

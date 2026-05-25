@@ -92,6 +92,9 @@ cp "$script_dir/SKILL.md" "$tmp_dir/"
 if [[ -d "$script_dir/references" ]]; then
   cp -R "$script_dir/references" "$tmp_dir/"
 fi
+if [[ -d "$script_dir/scripts" ]]; then
+  cp -R "$script_dir/scripts" "$tmp_dir/"
+fi
 
 if [[ -e "$dest_dir" ]]; then
   rm -rf "$dest_dir"

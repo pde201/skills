@@ -113,6 +113,11 @@ Run with --force to replace it:
     copyDir(referencesDir, path.join(tempDir, "references"));
   }
 
+  const scriptsDir = path.join(repoRoot, "scripts");
+  if (fs.existsSync(scriptsDir)) {
+    copyDir(scriptsDir, path.join(tempDir, "scripts"));
+  }
+
   if (fs.existsSync(destDir)) {
     fs.rmSync(destDir, { recursive: true, force: true });
   }

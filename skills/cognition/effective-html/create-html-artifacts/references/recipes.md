@@ -148,3 +148,110 @@ if (deck) {
 }
 </script>
 ```
+
+## Searchable Table
+
+```html
+<div class="searchable-container">
+  <div class="search-bar">
+    <label for="table-search" class="sr-only">Search table rows</label>
+    <input type="text" id="table-search" placeholder="Type to filter rows..." aria-controls="data-table">
+  </div>
+  <table id="data-table">
+    <thead>
+      <tr>
+        <th>Component</th>
+        <th>Status</th>
+        <th>Description</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr class="searchable-row">
+        <td><strong>Auth API</strong></td>
+        <td>Active</td>
+        <td>Handles session tokens, OAuth flow, and token revocation.</td>
+      </tr>
+      <tr class="searchable-row">
+        <td><strong>Emissions Engine</strong></td>
+        <td>Deprecated</td>
+        <td>Old calculator replaced by Financed Emissions v2.</td>
+      </tr>
+      <tr class="searchable-row">
+        <td><strong>Zero Ledger</strong></td>
+        <td>Planning</td>
+        <td>Double entry blockchain mapping for compliance accounting.</td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<script>
+document.getElementById('table-search')?.addEventListener('input', (event) => {
+  const query = event.target.value.toLowerCase().trim();
+  document.querySelectorAll('.searchable-row').forEach((row) => {
+    const text = row.textContent.toLowerCase();
+    row.style.display = text.includes(query) ? '' : 'none';
+  });
+});
+</script>
+```
+
+```css
+.search-bar { margin-bottom: 12px; }
+.search-bar input {
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font: 14px var(--sans);
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+```
+
+## Dynamic Mermaid Diagrams
+
+Use this recipe to render live Mermaid flowcharts or sequence diagrams in your self-contained report.
+
+```html
+<div class="mermaid-container">
+  <div class="mermaid-raw" style="display: none;">
+    graph TD
+      A[Client Request] --> B{Valid JWT?}
+      B -- Yes --> C[Process Sector Data]
+      B -- No --> D[Return 401 Unauthorized]
+  </div>
+  <!-- Mermaid Target -->
+  <div class="mermaid-render" id="flowchart-diagram">Loading diagram...</div>
+</div>
+
+<script>
+(function() {
+  // Dynamically load Mermaid from a CDN with security settings
+  const script = document.createElement('script');
+  script.src = 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js';
+  script.onload = () => {
+    mermaid.initialize({ startOnLoad: false, theme: 'neutral' });
+    const rawContent = document.querySelector('.mermaid-raw').textContent.trim();
+    const renderTarget = document.getElementById('flowchart-diagram');
+    renderTarget.innerHTML = rawContent;
+    mermaid.init(undefined, renderTarget);
+  };
+  script.onerror = () => {
+    document.getElementById('flowchart-diagram').innerHTML = 
+      '<p class="error-msg">⚠️ Failed to load diagram rendering engine (Mermaid CDN blocked/offline).</p>';
+  };
+  document.head.appendChild(script);
+})();
+</script>
+```
+

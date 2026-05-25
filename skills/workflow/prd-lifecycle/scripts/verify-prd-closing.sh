@@ -10,6 +10,13 @@ fi
 
 echo "=== Verifying PRD #$PARENT_ID Closing Requirements ==="
 
+# 0. Check Git branch name matches parent ID for traceability
+CURRENT_BRANCH=$(git branch --show-current)
+if [[ ! "$CURRENT_BRANCH" =~ "$PARENT_ID" ]]; then
+  echo "⚠️ Warning: Current branch '$CURRENT_BRANCH' does not contain parent PRD ID '#$PARENT_ID'."
+  echo "   Best practice suggests using branch names like: feature/issue-$PARENT_ID"
+fi
+
 # 1. Check if all child issues linked to parent PRD are closed
 echo "Checking linked child issues on GitHub..."
 OPEN_CHILDREN=$(gh issue list --state open --json number,body --jq ".[] | select(.body | contains(\"#$PARENT_ID\")) | .number")

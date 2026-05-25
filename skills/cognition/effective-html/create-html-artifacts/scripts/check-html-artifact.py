@@ -26,10 +26,33 @@ class ArtifactParser(HTMLParser):
         self._current_button_text: list[str] = []
         self.inputs: list[dict[str, str]] = []
         self.labels_for: set[str] = set()
+        
+        # New Accessibility Fields
+        self.images: list[dict[str, str]] = []
+        self.positive_tabindexes: list[tuple[str, str]] = []
+        self.anchors: list[dict[str, str]] = []
+        self.anchor_text: list[str] = []
+        self._anchor_depth = 0
+        self._current_anchor_text: list[str] = []
+        self.all_ids: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attr = {key.lower(): value or "" for key, value in attrs}
         self.stack.append(tag)
+        
+        # Track IDs for uniqueness check
+        element_id = attr.get("id")
+        if element_id:
+            self.all_ids.append(element_id)
+
+        # Track tabindex > 0
+        if "tabindex" in attr:
+            try:
+                if int(attr["tabindex"]) > 0:
+                    self.positive_tabindexes.append((tag, attr["tabindex"]))
+            except ValueError:
+                pass
+
         if tag == "title":
             self.in_title = True
         elif tag == "meta" and attr.get("name", "").lower() == "viewport":
@@ -48,10 +71,18 @@ class ArtifactParser(HTMLParser):
                 self.external_refs.append(attr["href"])
         elif tag in {"img", "iframe", "audio", "video", "source"} and attr.get("src"):
             self.external_refs.append(attr["src"])
+            if tag == "img":
+                self.images.append(attr)
+        elif tag == "img":
+            self.images.append(attr)
         elif tag == "button":
             self.buttons.append(attr)
             self._button_depth += 1
             self._current_button_text = []
+        elif tag == "a":
+            self.anchors.append(attr)
+            self._anchor_depth += 1
+            self._current_anchor_text = []
         elif tag in {"input", "textarea", "select"}:
             self.inputs.append(attr)
         elif tag == "label" and attr.get("for"):
@@ -60,10 +91,14 @@ class ArtifactParser(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag == "title":
             self.in_title = False
-        if tag == "button" and self._button_depth:
+        elif tag == "button" and self._button_depth:
             self.button_text.append(" ".join("".join(self._current_button_text).split()))
             self._button_depth -= 1
             self._current_button_text = []
+        elif tag == "a" and self._anchor_depth:
+            self.anchor_text.append(" ".join("".join(self._current_anchor_text).split()))
+            self._anchor_depth -= 1
+            self._current_anchor_text = []
         if self.stack:
             self.stack.pop()
 
@@ -72,6 +107,8 @@ class ArtifactParser(HTMLParser):
             self.title_text.append(data)
         if self._button_depth:
             self._current_button_text.append(data)
+        if self._anchor_depth:
+            self._current_anchor_text.append(data)
 
 
 def check(path: Path) -> tuple[list[str], list[str]]:
@@ -107,6 +144,28 @@ def check(path: Path) -> tuple[list[str], list[str]]:
         if not any(key in button for key in ("aria-label", "title")) and not visible_text:
             warnings.append(f"Button near {button_id!r} may need visible text or aria-label.")
 
+    for index, anchor in enumerate(parser.anchors):
+        anchor_id = anchor.get("id", "anchor")
+        visible_text = parser.anchor_text[index] if index < len(parser.anchor_text) else ""
+        if "href" in anchor and not any(key in anchor for key in ("aria-label", "title")) and not visible_text:
+            warnings.append(f"Anchor link near {anchor_id!r} with href {anchor.get('href')!r} has no visible text or aria-label.")
+
+    for img in parser.images:
+        if "alt" not in img:
+            warnings.append(f"Image with src {img.get('src', 'unknown')!r} is missing an 'alt' attribute.")
+
+    for tag, tab_val in parser.positive_tabindexes:
+        warnings.append(f"Positive tabindex={tab_val!r} detected on <{tag}> element. Avoid positive tabindex as it breaks focus flow.")
+
+    seen_ids = set()
+    dup_ids = set()
+    for item_id in parser.all_ids:
+        if item_id in seen_ids:
+            dup_ids.add(item_id)
+        seen_ids.add(item_id)
+    if dup_ids:
+        errors.append("Duplicate element IDs found (violates uniqueness): " + ", ".join(sorted(dup_ids)))
+
     input_ids = {attrs.get("id", "") for attrs in parser.inputs if attrs.get("id")}
     unlabeled = sorted(input_ids - parser.labels_for)
     if unlabeled:
@@ -119,6 +178,23 @@ def check(path: Path) -> tuple[list[str], list[str]]:
         warnings.append("Avoid obsolete or distracting elements such as <marquee>.")
     if len(text) > 500_000:
         warnings.append("Artifact is larger than 500 KB; check whether embedded data should be summarized.")
+
+    # Impeccable Design Checks
+    import re
+    # Check for pure white/black (ignoring print overrides)
+    clean_style_text = re.sub(r'@media\s+print\s*\{[^}]*\}', '', text, flags=re.I)
+    if re.search(r'color\s*:\s*(#000|#000000|black)\b', clean_style_text, re.I) or \
+       re.search(r'background(-color)?\s*:\s*(#fff|#ffffff|white)\b', clean_style_text, re.I):
+        warnings.append("Pure black (#000) or pure white (#fff) used in CSS. Prefer warm-tinted neutrals in OKLCH.")
+    # Check for side-stripe borders (accent line > 1px)
+    if re.search(r'border-(left|right)\s*:\s*([2-9]|\d{2,})px\b', text, re.I):
+        warnings.append("Side-stripe border (accent line > 1px) detected. Avoid thick side-borders on cards or panels.")
+    # Check for gradient text
+    if "background-clip" in text and "text" in text and "gradient" in text:
+        warnings.append("Gradient text (background-clip: text) detected. Avoid decorative text gradients.")
+    # Check for body line width constraint
+    if parser.has_style and "max-width" not in text:
+        warnings.append("No max-width constraints found. Capping paragraph widths (65-75ch) improves readability.")
 
     return errors, warnings
 

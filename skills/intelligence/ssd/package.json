@@ -8,6 +8,7 @@
   "files": [
     "bin/",
     "references/",
+    "scripts/",
     "SKILL.md",
     "README.md",
     "install.sh"

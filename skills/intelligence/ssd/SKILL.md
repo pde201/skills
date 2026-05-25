@@ -78,8 +78,14 @@ During round `N`:
 5. on miss or low-value partial reuse, decide whether a backup branch can still arrive in time to help
 
 After round `N`:
-1. log hit/miss status, reuse ratio, and timing
-2. shrink budget, step down backup, or disable speculation based on measured results
+1. log hit/miss status, reuse ratio, and timing using the tracker CLI:
+   ```bash
+   node scripts/ssd-tracker.js log --round <id> --status <status> --primary-ms <ms> --executor-ms <ms> [--reuse <ratio>] [--key <key>] [--reason <reason>]
+   ```
+2. shrink budget, step down backup, or disable speculation based on measured results. Check overall metrics and trigger diagnostics with:
+   ```bash
+   node scripts/ssd-tracker.js stats
+   ```
 
 Never speculate beyond one step of lookahead.
 

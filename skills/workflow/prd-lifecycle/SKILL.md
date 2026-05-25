@@ -42,5 +42,8 @@ Once all child issues are closed:
   bash scripts/verify-prd-closing.sh <parent_prd_issue_id>
   ```
 - [ ] Stage/commit the `docs/walkthrough.html` file to Git.
-- [ ] Paste the markdown version of the walkthrough directly as the comment body of the closed parent PRD issue.
-- [ ] Close the parent PRD issue.
+- [ ] Run the automated comment and close script to post the walkthrough directly to GitHub and close the parent issue:
+  ```bash
+  node scripts/post-walkthrough.js <parent_prd_issue_id> [walkthrough.md]
+  ```
+

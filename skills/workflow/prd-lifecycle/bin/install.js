@@ -6,11 +6,11 @@ const os = require("os");
 const path = require("path");
 
 function usage() {
-  console.log(`Install the prd-lifecycle skill.
+  console.log(`Install the Acuity prd-lifecycle skill.
 
 Usage:
-  npx --yes github:pde201/skills/skills/prd-lifecycle [agents|codex|claude] [--force]
-  npx --yes github:pde201/skills/skills/prd-lifecycle --dest /path/to/skills-dir [--force]
+  npx --yes github:pde201/skills/skills/workflow/prd-lifecycle [agents|codex|claude] [--force]
+  npx --yes github:pde201/skills/skills/workflow/prd-lifecycle --dest /path/to/skills-dir [--force]
 
 Targets:
   agents  Install to \${AGENTS_HOME:-$HOME/.agents}/skills (default)
@@ -103,7 +103,7 @@ function main() {
     console.error(`error: ${destDir} already exists
 
 Run with --force to replace it:
-  npx --yes github:pde201/skills/skills/prd-lifecycle ${options.target} --force`);
+  npx --yes github:pde201/skills/skills/workflow/prd-lifecycle ${options.target} --force`);
     process.exit(1);
   }
 

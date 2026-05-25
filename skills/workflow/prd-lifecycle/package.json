@@ -1,10 +1,10 @@
 {
-  "name": "prd-lifecycle-skill",
+  "name": "@acuity-skills/prd-lifecycle",
   "version": "1.0.0",
   "description": "An agent skill to manage parent PRD and child implementation issue lifecycles with verification hooks and walkthrough comment generators.",
   "main": "SKILL.md",
   "bin": {
-    "prd-lifecycle-skill": "bin/install.js"
+    "acuity-prd-lifecycle": "bin/install.js"
   },
   "files": [
     "bin/",

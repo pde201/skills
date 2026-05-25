@@ -1,0 +1,22 @@
+{
+  "name": "@acuity-skills/effective-html",
+  "version": "1.0.0",
+  "description": "Install the effective-html skill for any SKILL.md-compatible agent or skills directory.",
+  "bin": {
+    "acuity-effective-html": "bin/install.js"
+  },
+  "files": [
+    "bin/",
+    "create-html-artifacts/",
+    "README.md",
+    "install.sh"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pde201/skills.git"
+  },
+  "license": "MIT"
+}

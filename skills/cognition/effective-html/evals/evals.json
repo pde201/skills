@@ -1,0 +1,65 @@
+{
+  "skill_name": "create-html-artifacts",
+  "evals": [
+    {
+      "id": 0,
+      "prompt": "hey i need to pitch a new architectural direction for our frontend layout to my team. Can you create a decision brief comparing React Server Components vs standard SSR? List tradeoffs, constraint scoring, and a final recommendation.",
+      "expected_output": "A self-contained HTML decision brief comparing RSC vs SSR with constraint scoring.",
+      "files": []
+    },
+    {
+      "id": 1,
+      "prompt": "ok so my boss asked for an implementation plan for the migration to Manifest V3 for our extension. Can you write a roadmap showing the scope, milestones, code changes, and a risk matrix?",
+      "expected_output": "A self-contained HTML implementation plan/roadmap for Manifest V3 migration.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "we just had a major outage in production with db locks. Can you prepare an incident report detailing the timeline of events, root cause analysis, KPI stats, and follow-up actions?",
+      "expected_output": "A self-contained HTML incident report detailing timeline, root cause, and follow-up actions.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "i want to design a design sheet that specifies our new branding colors, type scale, spacing tokens, and variant contact sheets for our button component.",
+      "expected_output": "A self-contained HTML design sheet featuring color swatches, type scales, and contact sheets.",
+      "files": []
+    },
+    {
+      "id": 4,
+      "prompt": "can you review the PR diff in pull_request.diff? Highlight severe security issues, list recommendations for fixes with before/after blocks, and output a summary metric card deck.",
+      "expected_output": "A self-contained HTML PR review document highlighting security findings and before/after diff code blocks.",
+      "files": []
+    },
+    {
+      "id": 5,
+      "prompt": "i'm trying to optimize a complex prompt flow. Can you build an interactive prompt tuner tool with inputs for variables (temperature, user profile), validation warnings, and a live prompt output preview?",
+      "expected_output": "An interactive, self-contained HTML prompt tuner playground with inputs and live preview updating.",
+      "files": []
+    },
+    {
+      "id": 6,
+      "prompt": "can you explain how the data pipeline works in src/pipeline/? I need an architecture explainer card map with entry points, module descriptions, and a request flow diagram.",
+      "expected_output": "A self-contained HTML architecture explainer with module cards and an inline SVG flow map.",
+      "files": []
+    },
+    {
+      "id": 7,
+      "prompt": "i'm presenting to the board in 15 minutes. Can you convert this research summary into a 5-slide lightweight deck that I can control using arrow keys?",
+      "expected_output": "A 5-slide presentation deck using deck.html as a base, navigable by arrow keys.",
+      "files": []
+    },
+    {
+      "id": 8,
+      "prompt": "we need to migrate our database from Postgres to Mongo. Can you draft a migration plan outlining the target states, phases, compatibility notes, and rollback steps?",
+      "expected_output": "A self-contained database migration roadmap with states, phase timelines, and rollback instructions.",
+      "files": []
+    },
+    {
+      "id": 9,
+      "prompt": "here is a trace of our failed request. Can you compile a debugging board showcasing the reproduction steps, evidence timeline, tested hypotheses, and proposed fixes?",
+      "expected_output": "A self-contained HTML debugging board with reproduction flows and hypotheses grids.",
+      "files": []
+    }
+  ]
+}

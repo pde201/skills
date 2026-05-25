@@ -8,6 +8,7 @@
   "files": [
     "bin/",
     "create-html-artifacts/",
+    "evals/",
     "README.md",
     "install.sh"
   ],

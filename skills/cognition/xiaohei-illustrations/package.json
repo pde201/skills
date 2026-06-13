@@ -1,0 +1,26 @@
+{
+  "name": "@acuity-skills/xiaohei-illustrations",
+  "version": "1.0.0",
+  "description": "Install the xiaohei-illustrations agent skill for Codex, Claude Code, or another skills directory.",
+  "bin": {
+    "acuity-xiaohei-illustrations": "bin/install.js"
+  },
+  "files": [
+    "bin/",
+    "references/",
+    "examples/",
+    "SKILL.md",
+    "README.md",
+    "install.sh",
+    "LICENSE",
+    "NOTICE.md"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pde201/skills.git"
+  },
+  "license": "MIT"
+}

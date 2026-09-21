@@ -265,6 +265,28 @@ The two `*_ALLOW` variables exist because a documented hook contract and a
 shipped build are not always the same thing, and both are the kind of question
 one live session settles. Leave them off until a live run says otherwise.
 
+### A question that does not apply is not asked
+
+`invented_target` asks whether a call invented "the path it names". Put to a
+call that names no path — `npm ci`, `git status`, `make` — that presupposes
+something which is not there, and an unanswerable question does not come back
+as a confident no. It comes back near the middle. Measured live on 2026-09-21,
+`npm ci` scored **0.51**, over the 0.45 ask threshold, interrupting the user
+over a path the command never mentioned.
+
+No threshold fixes that: 0.51 sits under real detections (0.56-0.77) and over
+conventional ones, so there is nowhere to put the line. So the hazard is
+marked `needsPath` and left out of the batch for calls that name nothing
+path-shaped. Omitting it changes no other answer, because questions batched
+over one state are scored independently.
+
+This is the original `invented_target` lesson one step earlier. That one was
+*ask whether the question is worded right before moving the number*; this one
+is *ask whether it applies before wording it*. Questions that were skipped are
+recorded in the log as `not_asked`, for the same reason sub-threshold
+probabilities are: a gate that has quietly stopped asking must not look like a
+question that is asking and finding nothing.
+
 **The thresholds have been measured against a recorded set, not against your
 sessions.** As of 2026-09-20 the seven guard cases and three slimming cases in
 `test/live.mjs` are judged correctly by a real Jev, with the nearest miss a

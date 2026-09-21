@@ -229,6 +229,13 @@ evidence is an obvious inference, not a guess. No threshold separates that
 moved the classes apart — conventional paths below `ask`, fabricated ones
 at 0.59 and 0.71 — which no amount of moving the number could have done.
 
+Before reaching for either the number or the wording, check that the
+question applied at all. `invented_target` is skipped for calls that name
+nothing path-shaped, because asking a call like `npm ci` whether it
+invented "the path it names" returns a middling probability rather than a
+no — 0.51 when measured, which is over the ask threshold. Skipped
+questions appear in the log as `not_asked`.
+
 Every probability is logged, including those that fired nothing and those
 a hazard raised that were then set aside. That is what makes *lowering* a
 threshold possible: a log of only what crossed the line can argue for

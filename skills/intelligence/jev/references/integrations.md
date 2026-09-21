@@ -23,7 +23,7 @@ briefs, saved output, or copied skill files.
 | --- | --- | --- |
 | Claude Code | `~/.claude/settings.json` / `CLAUDE_SETTINGS` | PreToolUse, PreCompact, SessionStart/compact |
 | Codex | `${CODEX_HOME:-~/.codex}/hooks.json` / `CODEX_HOOKS` | Same plus UserPromptSubmit and SessionEnd |
-| Antigravity | `~/.gemini/config/hooks.json` / `JEV_ANTIGRAVITY_HOOKS` | PreToolUse guard only |
+| Antigravity | `~/.gemini/config/hooks.json` / `JEV_ANTIGRAVITY_HOOKS` | PreToolUse (guard and command slimming via overwrite), PreInvocation (context injection) |
 
 The table describes adapter assumptions, not verified support in every host
 release. Before claiming compatibility record host name, exact version, platform,
@@ -32,10 +32,13 @@ the installed host help or authoritative documentation for its current contract.
 No host version has been certified by the offline suite.
 
 Codex integrations may require `/hooks` trust and enabled hooks in the host.
-Verify those controls exist in the installed build. Antigravity's config path and
-tool names vary; inspect the actual build rather than writing multiple possible
-files. `JEV_ANTIGRAVITY_MATCHER` controls names registered by its installer.
-This adapter implements no automatic slimming or compaction support.
+Verify those controls exist in the installed build. Antigravity's config path is
+`~/.gemini/config/hooks.json` by default. `JEV_ANTIGRAVITY_MATCHER` controls tool
+names registered by its installer. Antigravity supports:
+- **PreToolUse guard**: deterministic checks for `run_command`, `view_file`, `replace_file_content`, and `write_to_file`, plus model hazard scoring.
+- **PreToolUse slimming**: rewrites `CommandLine` via `overwrite: { CommandLine: ... }`.
+- **PreInvocation context**: injects carry-forward briefs via `injectSteps`.
+- **Skill packaging**: `./install-skill.sh antigravity` installs directly to `~/.gemini/config/skills/jev`.
 
 Restart the target host after registration or environment changes. Verify in
 three stages: registration; direct synthetic adapter event; real host tool call.

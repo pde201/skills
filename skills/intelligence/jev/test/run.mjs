@@ -626,10 +626,16 @@ const agyCall = (name, args) => ({
   stepIdx: 3,
 });
 
-test("antigravity: an ordinary call produces no output at all", () => {
+test("antigravity: an ordinary command produces no output at all", () => {
   // Saying {"decision":"allow"} would grant permission the user never
   // gave. Silence leaves Antigravity's own rules in charge.
-  assert.equal(runAgy(agyCall("run_command", { CommandLine: "ls -la", Cwd: process.cwd() })), null);
+  assert.equal(runAgy(agyCall("run_command", { CommandLine: "echo hello", Cwd: process.cwd() })), null);
+});
+
+test("antigravity: a bloated command is rewritten via overwrite and decision allow", () => {
+  const result = runAgy(agyCall("run_command", { CommandLine: "npm test" }));
+  assert.ok(result.overwrite?.CommandLine?.includes("jev-slim.mjs"));
+  assert.equal(result.decision, "allow", "antigravity requires decision allow when rewriting arguments");
 });
 
 test("antigravity: a catastrophic command asks before it runs", () => {
@@ -642,6 +648,16 @@ test("antigravity: reading a file that does not exist is denied", () => {
   const result = runAgy(agyCall("view_file", { AbsolutePath: "/definitely/not/here.ts" }));
   assert.equal(result.decision, "deny");
   assert.match(result.reason, /does not exist/);
+});
+
+test("antigravity: broken edit is denied deterministically", () => {
+  const result = runAgy(agyCall("replace_file_content", {
+    TargetFile: join(ROOT, "package.json"),
+    TargetContent: "this string is definitely not in package.json",
+    ReplacementContent: "replacement",
+  }));
+  assert.equal(result.decision, "deny");
+  assert.match(result.reason, /does not appear/);
 });
 
 test("antigravity: a relative path is never existence-checked", () => {
@@ -663,11 +679,11 @@ test("antigravity: a PostToolUse-shaped payload is ignored", () => {
 test("antigravity: the kill switch silences the hook entirely", () => {
   const event = agyCall("run_command", { CommandLine: "git push --force origin main" });
   assert.equal(runAgy(event, { JEV_HOOKS: "0" }), null);
-  assert.equal(runAgy(event, { JEV_HOOKS_GUARD: "0" }), null);
+  assert.equal(runAgy(event, { JEV_HOOKS_GUARD: "0", JEV_HOOKS_SLIM: "0" }), null);
 });
 
 test("antigravity: an explicit allow is emitted only when it is asked for by name", () => {
-  const event = agyCall("run_command", { CommandLine: "ls -la", Cwd: process.cwd() });
+  const event = agyCall("run_command", { CommandLine: "echo hello", Cwd: process.cwd() });
   assert.deepEqual(runAgy(event, { JEV_ANTIGRAVITY_EXPLICIT_ALLOW: "1" }), { decision: "allow" });
 });
 
@@ -715,6 +731,20 @@ test("translate maps what it is sure of and hands the rest over untouched", () =
   assert.deepEqual(translate({ name: "view_file", args: { AbsolutePath: "/a/b.ts" } }), {
     toolName: "Read",
     input: { file_path: "/a/b.ts" },
+  });
+  assert.deepEqual(translate({
+    name: "replace_file_content",
+    args: { TargetFile: "/a/b.ts", TargetContent: "old", ReplacementContent: "new" },
+  }), {
+    toolName: "Edit",
+    input: { file_path: "/a/b.ts", old_string: "old", new_string: "new", allow_multiple: undefined },
+  });
+  assert.deepEqual(translate({
+    name: "write_to_file",
+    args: { TargetFile: "/a/b.ts", CodeContent: "content", Overwrite: true },
+  }), {
+    toolName: "Write",
+    input: { file_path: "/a/b.ts", content: "content", overwrite: true },
   });
   // Unmapped: the name and arguments go to the judgment layer as they are,
   // which needs no mapping to read them.

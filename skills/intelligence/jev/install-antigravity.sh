@@ -10,9 +10,8 @@
 #    ./install-antigravity.sh --remove   take the hooks back out
 #    ./install-antigravity.sh --check    show what is currently installed
 #
-#  Guarding only. Antigravity's PreToolUse cannot rewrite a tool's
-#  arguments and it fires no compaction event, so command slimming and
-#  the carry-forward brief are not available here. See README.md.
+#  Guarding, command slimming (via PreToolUse argument rewrite), and context
+#  carry-forward (via PreInvocation step injection).
 # ──────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -86,13 +85,17 @@ jq --arg cmd "$HOOK_CMD" --arg matcher "$MATCHER" '
     PreToolUse: [
       { matcher: $matcher,
         hooks: [ { type: "command", command: $cmd, timeout: 15 } ] }
+    ],
+    PreInvocation: [
+      { type: "command", command: $cmd, timeout: 10 }
     ]
   }
 ' "$HOOKS" > "$tmp"
 
 jq empty "$tmp" || { warn "refusing to write invalid JSON; hooks untouched"; rm -f "$tmp"; exit 1; }
 mv "$tmp" "$HOOKS"
-ok "PreToolUse registered for: $MATCHER"
+ok "PreToolUse registered for: $MATCHER (guard and command slimming)"
+ok "PreInvocation registered (context carry-forward)"
 
 mkdir -p "$BIN_DIR"
 ln -sfn "$JEV_DIR/bin/jev-slim.mjs" "$BIN_DIR/jev-slim"
@@ -126,13 +129,11 @@ fi
 cat <<EOF
 
 ────────────────────────────────────────────────────────────────────
-  Installed. Restart Antigravity to pick the hook up.
+  Installed. Restart Antigravity to pick the hooks up.
 
-  Guarding only. Antigravity's PreToolUse can block a call but cannot
-  rewrite its arguments, so commands are not slimmed automatically, and
-  no event fires around compaction, so there is no carry-forward brief.
-  README.md has a rules snippet that gets the agent to reach for
-  jev-slim itself.
+  Registered capabilities:
+  - PreToolUse: command slimming (via overwrite) & safety guarding
+  - PreInvocation: single-use context carry-forward briefs
 
   If this build reads a different hooks.json, check:
 

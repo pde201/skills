@@ -14,19 +14,20 @@ usage() {
 Install the jev skill.
 
 Usage:
-  ./install-skill.sh [codex|claude] [--force]
+  ./install-skill.sh [codex|claude|antigravity] [--force]
   ./install-skill.sh --dest /path/to/skills-dir [--force]
 
 Targets:
-  codex   Install to ${CODEX_HOME:-$HOME/.codex}/skills
-  claude  Install to ${CLAUDE_HOME:-$HOME/.claude}/skills
+  codex        Install to ${CODEX_HOME:-$HOME/.codex}/skills
+  claude       Install to ${CLAUDE_HOME:-$HOME/.claude}/skills
+  antigravity  Install to ${ANTIGRAVITY_HOME:-$HOME/.gemini/config}/skills
 
 Options:
   --dest DIR  Install into a custom skills directory
   --force     Replace an existing jev install
   -h, --help  Show this help
 
-This copies the skill. The Claude Code hooks are registered separately, by
+This copies the skill. The agent hooks are registered separately, by
 running install.sh from the installed skill directory.
 USAGE
 }
@@ -37,7 +38,7 @@ force="0"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    codex|claude)
+    codex|claude|antigravity)
       target="$1"
       shift
       ;;
@@ -79,6 +80,9 @@ if [[ -z "$dest_base" ]]; then
       ;;
     claude)
       dest_base="${CLAUDE_HOME:-$HOME/.claude}/skills"
+      ;;
+    antigravity)
+      dest_base="${ANTIGRAVITY_HOME:-$HOME/.gemini/config}/skills"
       ;;
   esac
 fi

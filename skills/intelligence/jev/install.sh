@@ -1,19 +1,44 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────
-#  Install the Jev decision layer into Claude Code.
+#  Install the Jev decision layer into a coding agent.
 #
-#  Merges three hook entries into ~/.claude/settings.json. Claude Code
-#  writes to that file itself, so this merges rather than symlinking, and
-#  re-running replaces only the jev entries and leaves everything else
-#  exactly as it was.
+#    ./install.sh                     Claude Code (the default)
+#    ./install.sh codex               Codex
+#    ./install.sh antigravity         Antigravity
+#    ./install.sh all                 every agent above
 #
-#    ./install.sh            install or update
-#    ./install.sh --remove   take the hooks back out
-#    ./install.sh --check    show what is currently installed
+#    ./install.sh [agent] --remove    take the hooks back out
+#    ./install.sh [agent] --check     show what is currently installed
+#
+#  Claude Code is the default because this script installed it before
+#  there was anything else to install, and the published one-liner says
+#  `install.sh` with no argument.
+#
+#  The Claude Code half is below: it merges three hook entries into
+#  ~/.claude/settings.json. Claude Code writes to that file itself, so
+#  this merges rather than symlinking, and re-running replaces only the
+#  jev entries and leaves everything else exactly as it was. The other
+#  agents live in install-codex.sh and install-antigravity.sh, which
+#  this script hands off to.
 # ──────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
 JEV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# ── Which agent ──────────────────────────────────────────────────────
+case "${1:-}" in
+  claude)      shift ;;
+  codex)       shift; exec bash "$JEV_DIR/install-codex.sh" "$@" ;;
+  antigravity) shift; exec bash "$JEV_DIR/install-antigravity.sh" "$@" ;;
+  all)
+    shift
+    bash "$JEV_DIR/install.sh" claude "$@"
+    bash "$JEV_DIR/install-codex.sh" "$@"
+    bash "$JEV_DIR/install-antigravity.sh" "$@"
+    exit 0
+    ;;
+esac
+
 SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 HOOK_CMD="node $JEV_DIR/bin/jev-hook.mjs"
 BIN_DIR="$HOME/.local/bin"
@@ -132,7 +157,12 @@ fi
 cat <<EOF
 
 ────────────────────────────────────────────────────────────────────
-  Installed. Start a new Claude Code session to pick the hooks up.
+  Installed for Claude Code. Start a new session to pick the hooks up.
+
+  For the other agents:
+
+    ./install.sh codex
+    ./install.sh antigravity
 
     JEV_HOOKS=0            turn everything off
     JEV_HOOKS_SLIM=0       keep the guard, stop rewriting commands

@@ -2,8 +2,8 @@
 # ──────────────────────────────────────────────────────────────────────
 #  Copy this skill into a skills directory. Packaging only.
 #
-#  This is NOT the Jev hook installer. Registering the Claude Code hooks
-#  is install.sh, run from the installed copy afterwards. The two are
+#  This is NOT the Jev hook installer. Registering an agent's hooks is
+#  install.sh, run from the installed copy afterwards. The two are
 #  deliberately separate files because they do unrelated things, and
 #  jev's hook installer had the name first.
 # ──────────────────────────────────────────────────────────────────────
@@ -100,12 +100,12 @@ mkdir -p "$dest_base"
 rm -rf "$tmp_dir"
 mkdir -p "$tmp_dir"
 
-for name in SKILL.md README.md install.sh install-skill.sh; do
+for name in SKILL.md README.md install.sh install-codex.sh install-antigravity.sh install-skill.sh; do
   [[ -f "$script_dir/$name" ]] && cp -p "$script_dir/$name" "$tmp_dir/"
 done
 
-# install.sh writes the absolute path of bin/jev-hook.mjs into the Claude
-# Code settings, so bin/ and lib/ have to travel with SKILL.md.
+# The installers write the absolute path of bin/jev-hook*.mjs into each
+# agent's settings, so bin/ and lib/ have to travel with SKILL.md.
 for name in bin lib test; do
   [[ -d "$script_dir/$name" ]] && cp -R "$script_dir/$name" "$tmp_dir/"
 done
@@ -119,8 +119,10 @@ mv "$tmp_dir" "$dest_dir"
 echo "Installed jev to:"
 echo "  $dest_dir"
 echo
-echo "The skill is installed; the Claude Code hooks are not yet registered."
+echo "The skill is installed; the agent hooks are not yet registered."
 echo "To register them:"
-echo "  $dest_dir/install.sh"
+echo "  $dest_dir/install.sh              # Claude Code"
+echo "  $dest_dir/install.sh codex        # Codex"
+echo "  $dest_dir/install.sh antigravity  # Antigravity"
 echo
 echo "Restart your agent to pick up the new skill."

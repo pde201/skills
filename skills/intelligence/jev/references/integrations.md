@@ -73,6 +73,17 @@ Check only whether it is present, never print its value or persist it in setting
 A missing key leaves deterministic local behavior active. An API call incurs
 remote data processing and cost; check the data policy first.
 
+Hooks read every `JEV_*` variable from the environment the agent hands them.
+Claude Code merges the `env` object from `~/.claude/settings.json` into each
+new session, which makes it the right home for machine-level tuning such as
+`JEV_RETRIES=0` (a plain string value; it is not a secret store, so the key
+does not belong there). Codex and Antigravity have no equivalent that this
+repo can cite: a GUI launch inherits the login session (`launchctl setenv`
+on macOS, republished at login by whatever already publishes the key), a
+terminal launch inherits the shell rc. In every host a running agent keeps
+the environment it started with, so changes need a new session, and for a
+GUI launch a relaunch of the app.
+
 For a build that ignores `updatedInput` without explicit approval, keep the
 approval boundary and set `JEV_HOOKS_SLIM=0` at host launch. The two `*_ALLOW`
 switches are permission changes, as described in SKILL.md, not routine fixes.

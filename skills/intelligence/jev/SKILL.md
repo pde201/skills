@@ -125,11 +125,11 @@ jev-slim exec --task "<goal>" -- '<command>'
 | `JEV_LOG` | `<JEV_STATE_DIR>/jev-log.jsonl` | Target decision log path. |
 | `JEV_STATE_DIR` | `~/.local/state/jev-hooks` | Directory for briefs, stashed prompts, per-session task files, the breaker state and the decision log. Full slim output is written to a private directory under the OS temp dir, not here. |
 | `JEV_TIMEOUT_MS` | `4000` | Per-attempt timeout for guard and slimming judgments before failing open. Supervision calls use fixed shorter budgets (2–2.5 s); carry-forward uses at least 8 s. |
-| `JEV_RETRIES` | `1` | Retries after a timeout, 429 or 5xx. The total wait is `(retries + 1) × timeout` plus backoff. |
+| `JEV_RETRIES` | `1` | Retries after a timeout, 429 or 5xx. The total wait is `(retries + 1) × timeout` plus backoff. With the breaker on, `0` is a sound choice: a failed judgment then costs one `JEV_TIMEOUT_MS` attempt, and the breaker rather than the retry absorbs a sustained outage. |
 | `JEV_BREAKER_FAILURES` | `3` | Consecutive provider failures (after retries) that open the circuit; `0` disables it. 4xx and malformed answers never count. |
 | `JEV_BREAKER_COOLDOWN_MS` | `60000` | How long remote judgments are skipped once the circuit is open. State in `<JEV_STATE_DIR>/breaker.json`; delete it to reset. |
 
-Install-time overrides (`CLAUDE_SETTINGS`, `CODEX_HOME`, `CODEX_HOOKS`, `JEV_ANTIGRAVITY_HOOKS`, `JEV_ANTIGRAVITY_MATCHER`, `CLAUDE_HOME`, `ANTIGRAVITY_HOME`) are listed in [references/integrations.md](references/integrations.md).
+Every variable above is read from the hook process's environment, which it inherits from the agent. Claude Code applies the `env` object in `~/.claude/settings.json` to each new session, so that is the place for per-machine tuning such as `JEV_RETRIES`; Codex and Antigravity inherit whatever launched them, the login session for a GUI launch (`launchctl setenv` on macOS) or the shell rc for a terminal launch. A running agent keeps the environment it started with. Install-time overrides (`CLAUDE_SETTINGS`, `CODEX_HOME`, `CODEX_HOOKS`, `JEV_ANTIGRAVITY_HOOKS`, `JEV_ANTIGRAVITY_MATCHER`, `CLAUDE_HOME`, `ANTIGRAVITY_HOME`) are listed in [references/integrations.md](references/integrations.md).
 
 ---
 

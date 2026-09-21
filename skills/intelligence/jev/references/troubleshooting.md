@@ -64,3 +64,12 @@ cannot establish a calibrated threshold. Use the eval protocol in `evals/`.
 Measure end-to-end latency, including retries and wrapper overhead. The timeout
 is per attempt; it is not a total hook deadline. Record p50/p95, cost, and
 critical-evidence retention rather than only average latency or fewer lines.
+
+A failed judgment waits `(JEV_RETRIES + 1) × JEV_TIMEOUT_MS`: 8 s at the
+defaults, which is what every guarded call and wrapped command paid during
+the 2026-09-21 provider outage until the breaker opened. `JEV_RETRIES=0`
+halves that and leaves sustained outages to the breaker; the retry only ever
+helped with a single transient 5xx or 429. Set it where the agent process
+will inherit it (Claude Code: `env` in `~/.claude/settings.json`; GUI-launched
+agents: the login session; terminals: the shell rc) and start a new session —
+a running one keeps the environment it began with.

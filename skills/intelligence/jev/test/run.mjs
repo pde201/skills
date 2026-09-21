@@ -432,3 +432,295 @@ test("user constraints survive a transcript full of other activity", () => {
   const brief = composeBrief(candidates, new Set(), {}, "keep going");
   assert.match(brief, /Never change the database schema/, "a stated constraint must never be trimmed away");
 });
+
+// ── the Codex adapter ────────────────────────────────────────────────
+//
+// Every case below drives the real hook binary through a subprocess, so
+// what is asserted is the JSON Codex would actually receive. The two
+// command shapes matter most: Codex has shipped a shell tool's `command`
+// both as a string and as an argv vector, and rewriting the wrong one is
+// a silent loss of slimming rather than a visible failure.
+
+const CODEX_HOOK = join(ROOT, "bin", "jev-hook-codex.mjs");
+
+function runCodex(event, env = {}) {
+  const out = execFileSync("node", [CODEX_HOOK], {
+    input: JSON.stringify(event),
+    env: { ...process.env, ...env },
+  }).toString();
+  return out.trim() ? JSON.parse(out) : null;
+}
+
+test("codex: the kill switch silences the hook entirely", () => {
+  const result = runCodex(
+    { hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: "npm test" } },
+    { JEV_HOOKS: "0" },
+  );
+  assert.equal(result, null);
+});
+
+test("codex: a string command is rewritten and never self-approved", () => {
+  const result = runCodex({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "npm test" },
+    cwd: process.cwd(),
+  });
+  assert.equal(result.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.match(result.hookSpecificOutput.updatedInput.command, /jev-slim\.mjs/);
+  assert.equal(
+    result.hookSpecificOutput.permissionDecision,
+    undefined,
+    "the hook must never grant permission on the user's behalf",
+  );
+});
+
+test("codex: an argv command is rewritten in place, and nothing else is touched", () => {
+  const result = runCodex({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: ["bash", "-lc", "npm test"], workdir: "/srv/app", timeout_ms: 5000 },
+    cwd: process.cwd(),
+  });
+  const updated = result.hookSpecificOutput.updatedInput;
+  assert.deepEqual(updated.command.slice(0, 2), ["bash", "-lc"], "the shell invocation must survive");
+  assert.match(updated.command[2], /jev-slim\.mjs/);
+  assert.match(updated.command[2], /npm test/);
+  assert.equal(updated.workdir, "/srv/app", "unrelated fields must be carried through");
+  assert.equal(updated.timeout_ms, 5000);
+});
+
+test("codex: a bare argv vector is left alone", () => {
+  // `["npm", "test"]` is not a shell command. Joining it would invent
+  // quoting that was never there, so it is not ours to rewrite.
+  const result = runCodex({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: ["npm", "test"] },
+    cwd: process.cwd(),
+  });
+  assert.equal(result, null);
+});
+
+test("codex: self-approval happens only when it is asked for by name", () => {
+  const result = runCodex(
+    {
+      hook_event_name: "PreToolUse",
+      tool_name: "Bash",
+      tool_input: { command: "npm test" },
+      cwd: process.cwd(),
+    },
+    { JEV_CODEX_SLIM_ALLOW: "1" },
+  );
+  assert.equal(result.hookSpecificOutput.permissionDecision, "allow");
+  assert.match(result.hookSpecificOutput.updatedInput.command, /jev-slim\.mjs/);
+});
+
+test("codex: an unknown command is left untouched", () => {
+  const result = runCodex({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo hi" },
+    cwd: process.cwd(),
+  });
+  assert.equal(result, null);
+});
+
+test("codex: a broken edit is denied", () => {
+  const result = runCodex({
+    hook_event_name: "PreToolUse",
+    tool_name: "Edit",
+    tool_input: { file_path: "/definitely/not/here.ts", old_string: "a", new_string: "b" },
+    cwd: process.cwd(),
+  });
+  assert.equal(result.hookSpecificOutput.permissionDecision, "deny");
+});
+
+test("codex: an apply_patch envelope is allowed through to the judgment layer", () => {
+  // The deterministic Edit checks read file_path/old_string, which a patch
+  // envelope does not have. They must stand down rather than guess — with
+  // no key there is no judgment either, so the call proceeds.
+  const result = runCodex({
+    hook_event_name: "PreToolUse",
+    tool_name: "apply_patch",
+    tool_input: { patch: "*** Begin Patch\n*** Update File: a.ts\n*** End Patch" },
+    cwd: process.cwd(),
+  });
+  assert.equal(result, null);
+});
+
+test("codex: the stashed prompt becomes the task the slimmer is given", () => {
+  // PreToolUse carries no prompt, so UserPromptSubmit stashes it. Without
+  // this the slimmer is told nothing about what it is keeping output for.
+  const session = "codex-sess-task";
+  const prompt = "find out why the build is failing";
+  assert.equal(runCodex({ hook_event_name: "UserPromptSubmit", session_id: session, prompt }), null);
+
+  const result = runCodex({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "npm run build" },
+    session_id: session,
+    cwd: process.cwd(),
+  });
+  const b64 = Buffer.from(prompt, "utf8").toString("base64");
+  assert.ok(
+    result.hookSpecificOutput.updatedInput.command.includes(b64),
+    "the rewritten command must carry the stashed request",
+  );
+});
+
+test("codex: compaction writes a brief and the next session start consumes it once", () => {
+  const transcript = fakeTranscript();
+  const session = "codex-sess-compact";
+  execFileSync("node", [CODEX_HOOK], {
+    input: JSON.stringify({
+      hook_event_name: "PreCompact",
+      transcript_path: transcript,
+      session_id: session,
+      trigger: "auto",
+    }),
+    env: process.env,
+  });
+
+  const first = runCodex({ hook_event_name: "SessionStart", source: "compact", session_id: session });
+  assert.match(first.hookSpecificOutput.additionalContext, /do not touch the public API/);
+
+  const second = runCodex({ hook_event_name: "SessionStart", source: "compact", session_id: session });
+  assert.equal(second, null, "a brief must be injected exactly once");
+});
+
+test("codex: a normal session start injects nothing", () => {
+  assert.equal(runCodex({ hook_event_name: "SessionStart", source: "startup", session_id: "x" }), null);
+});
+
+test("codex: an unknown event is ignored", () => {
+  assert.equal(runCodex({ hook_event_name: "SomethingNew" }), null);
+});
+
+test("codex: malformed input does not break the hook", () => {
+  const out = execFileSync("node", [CODEX_HOOK], { input: "not json at all" }).toString();
+  assert.equal(out.trim(), "");
+});
+
+// ── the Antigravity adapter ──────────────────────────────────────────
+//
+// Antigravity's decision vocabulary is its own, and its allow path has no
+// "no opinion" value — so the adapter says nothing at all when it has
+// nothing to say, and these tests exist to keep it that way.
+
+const AGY_HOOK = join(ROOT, "bin", "jev-hook-antigravity.mjs");
+
+function runAgy(event, env = {}) {
+  const out = execFileSync("node", [AGY_HOOK], {
+    input: JSON.stringify(event),
+    env: { ...process.env, ...env },
+  }).toString();
+  return out.trim() ? JSON.parse(out) : null;
+}
+
+const agyCall = (name, args) => ({
+  toolCall: { name, args },
+  workspacePaths: [process.cwd()],
+  conversationId: "c-test",
+  stepIdx: 3,
+});
+
+test("antigravity: an ordinary call produces no output at all", () => {
+  // Saying {"decision":"allow"} would grant permission the user never
+  // gave. Silence leaves Antigravity's own rules in charge.
+  assert.equal(runAgy(agyCall("run_command", { CommandLine: "ls -la", Cwd: process.cwd() })), null);
+});
+
+test("antigravity: a catastrophic command asks before it runs", () => {
+  const result = runAgy(agyCall("run_command", { CommandLine: "git push --force origin main" }));
+  assert.equal(result.decision, "ask");
+  assert.match(result.reason, /force push/);
+});
+
+test("antigravity: reading a file that does not exist is denied", () => {
+  const result = runAgy(agyCall("view_file", { AbsolutePath: "/definitely/not/here.ts" }));
+  assert.equal(result.decision, "deny");
+  assert.match(result.reason, /does not exist/);
+});
+
+test("antigravity: a relative path is never existence-checked", () => {
+  // It would be resolved against this process's cwd, which is not
+  // necessarily the workspace, and a wrong answer there is a denied read.
+  assert.equal(runAgy(agyCall("view_file", { AbsolutePath: "src/api/client.ts" })), null);
+});
+
+test("antigravity: an unrecognised tool is passed to the judgment layer, not blocked", () => {
+  const result = runAgy(agyCall("some_future_tool", { Whatever: "value" }));
+  assert.equal(result, null, "no key means no judgment, and no judgment means the call proceeds");
+});
+
+test("antigravity: a PostToolUse-shaped payload is ignored", () => {
+  const event = { ...agyCall("run_command", { CommandLine: "git push --force origin main" }), error: "" };
+  assert.equal(runAgy(event), null, "the after case must never produce a verdict");
+});
+
+test("antigravity: the kill switch silences the hook entirely", () => {
+  const event = agyCall("run_command", { CommandLine: "git push --force origin main" });
+  assert.equal(runAgy(event, { JEV_HOOKS: "0" }), null);
+  assert.equal(runAgy(event, { JEV_HOOKS_GUARD: "0" }), null);
+});
+
+test("antigravity: an explicit allow is emitted only when it is asked for by name", () => {
+  const event = agyCall("run_command", { CommandLine: "ls -la", Cwd: process.cwd() });
+  assert.deepEqual(runAgy(event, { JEV_ANTIGRAVITY_EXPLICIT_ALLOW: "1" }), { decision: "allow" });
+});
+
+test("antigravity: malformed input does not break the hook", () => {
+  const out = execFileSync("node", [AGY_HOOK], { input: "not json at all" }).toString();
+  assert.equal(out.trim(), "");
+});
+
+// ── the translations, directly ───────────────────────────────────────
+
+const { readCommand, writeCommand } = await import("../bin/jev-hook-codex.mjs");
+const { translate } = await import("../bin/jev-hook-antigravity.mjs");
+
+test("readCommand understands both shapes and refuses the rest", () => {
+  assert.deepEqual(readCommand({ command: "npm test" }), { command: "npm test", shape: "string" });
+  assert.deepEqual(readCommand({ command: ["bash", "-lc", "npm test"] }), {
+    command: "npm test",
+    shape: "argv",
+    index: 2,
+  });
+  assert.deepEqual(readCommand({ command: ["zsh", "-c", "ls"] }), { command: "ls", shape: "argv", index: 2 });
+  assert.equal(readCommand({ command: ["npm", "test"] }), null, "a bare argv vector is not a shell command");
+  assert.equal(readCommand({ command: 7 }), null);
+  assert.equal(readCommand({}), null);
+  assert.equal(readCommand(null), null);
+});
+
+test("writeCommand puts a command back the way it came", () => {
+  const argv = { command: ["bash", "-lc", "npm test"], workdir: "/srv" };
+  const rewritten = writeCommand(argv, "slimmed", readCommand(argv));
+  assert.deepEqual(rewritten.command, ["bash", "-lc", "slimmed"]);
+  assert.equal(rewritten.workdir, "/srv");
+  assert.deepEqual(argv.command, ["bash", "-lc", "npm test"], "the original must not be mutated");
+
+  const str = { command: "npm test", description: "run tests" };
+  const out = writeCommand(str, "slimmed", readCommand(str));
+  assert.deepEqual(out, { command: "slimmed", description: "run tests" });
+});
+
+test("translate maps what it is sure of and hands the rest over untouched", () => {
+  assert.deepEqual(translate({ name: "run_command", args: { CommandLine: "ls" } }), {
+    toolName: "Bash",
+    input: { command: "ls" },
+  });
+  assert.deepEqual(translate({ name: "view_file", args: { AbsolutePath: "/a/b.ts" } }), {
+    toolName: "Read",
+    input: { file_path: "/a/b.ts" },
+  });
+  // Unmapped: the name and arguments go to the judgment layer as they are,
+  // which needs no mapping to read them.
+  assert.deepEqual(translate({ name: "browser_click", args: { Selector: "#go" } }), {
+    toolName: "browser_click",
+    input: { Selector: "#go" },
+  });
+  assert.deepEqual(translate({}), { toolName: "", input: {} });
+});

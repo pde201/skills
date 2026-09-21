@@ -7,6 +7,11 @@ const path = require("path");
 
 // Packaging only — this copies the skill into a skills directory. It is not
 // the Jev hook installer; that is install.sh inside the skill, run after.
+//
+// Note the two different meanings of "codex" and "claude" here: this script's
+// argument picks which skills *directory* to copy into, while install.sh's
+// argument picks which agent's *hooks* to register. One installed copy can
+// serve every agent on the machine.
 const SELF = "install.js";
 
 function usage() {
@@ -25,8 +30,13 @@ Options:
   --force     Replace an existing jev install
   -h, --help  Show this help
 
-This copies the skill. The Claude Code hooks are registered separately, by
-running install.sh from the installed skill directory.`);
+This copies the skill into a skills directory. The agent hooks are registered
+separately, by running install.sh from the installed skill directory:
+
+  install.sh              Claude Code
+  install.sh codex        Codex
+  install.sh antigravity  Antigravity
+  install.sh all          all three`);
 }
 
 function parseArgs(argv) {
@@ -123,9 +133,16 @@ Run with --force to replace it:
   fs.mkdirSync(tempDir, { recursive: true });
 
   // The hook scripts, the engine and the tests are the skill's supporting
-  // files: install.sh points Claude Code at bin/jev-hook.mjs by absolute
+  // files: each installer points its agent at a bin/jev-hook*.mjs by absolute
   // path, so bin/ and lib/ have to travel with SKILL.md.
-  for (const name of ["SKILL.md", "README.md", "install.sh", "install-skill.sh"]) {
+  for (const name of [
+    "SKILL.md",
+    "README.md",
+    "install.sh",
+    "install-codex.sh",
+    "install-antigravity.sh",
+    "install-skill.sh",
+  ]) {
     const source = path.join(repoRoot, name);
     if (fs.existsSync(source)) {
       copyFile(source, path.join(tempDir, name));
@@ -149,9 +166,12 @@ Run with --force to replace it:
   console.log("Installed jev to:");
   console.log(`  ${destDir}`);
   console.log("");
-  console.log("The skill is installed; the Claude Code hooks are not yet registered.");
+  console.log("The skill is installed; the agent hooks are not yet registered.");
   console.log("To register them:");
-  console.log(`  ${path.join(destDir, "install.sh")}`);
+  const installer = path.join(destDir, "install.sh");
+  console.log(`  ${installer}              # Claude Code`);
+  console.log(`  ${installer} codex        # Codex`);
+  console.log(`  ${installer} antigravity  # Antigravity`);
   console.log("");
   console.log("Restart your agent to pick up the new skill.");
 }

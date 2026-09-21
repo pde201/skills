@@ -1,10 +1,11 @@
 ---
 name: jev
 description: >-
-  Operate the Jev decision layer — Claude Code hooks that slim bloated tool
-  output, guard risky tool calls, and carry a brief across compaction, using
-  TypeSafe's Jev for the judgments. Use when asked to install, check, remove
-  or update the Jev hooks; when TYPESAFE_API_KEY, jev-slim, jev-hook or
+  Operate the Jev decision layer — hooks for Claude Code, Codex and
+  Antigravity that slim bloated tool output, guard risky tool calls, and carry
+  a brief across compaction, using TypeSafe's Jev for the judgments. Use when
+  asked to install, check, remove or update the Jev hooks for any of those
+  agents; when TYPESAFE_API_KEY, jev-slim, jev-hook or
   JEV_* environment variables come up; when output arrives truncated with
   "[… N lines hidden …]" markers or a "full output" path; when a tool call is
   unexpectedly questioned or blocked by a hook; when a brief is injected after
@@ -13,16 +14,23 @@ description: >-
 
 # Jev decision layer
 
-A set of Claude Code hooks that spend a few hundred milliseconds and a
-fraction of a cent on a small typed judgment instead of letting three
-recurring problems eat the context window: tool output that is mostly
-noise, compaction that drops the wrong things, and tool calls that fail
-for reasons something could have known in advance.
+A set of hooks — for Claude Code, Codex and Antigravity — that spend a
+few hundred milliseconds and a fraction of a cent on a small typed
+judgment instead of letting three recurring problems eat the context
+window: tool output that is mostly noise, compaction that drops the wrong
+things, and tool calls that fail for reasons something could have known
+in advance.
 
-This skill is the operating manual. The hooks are run by Claude Code
+This skill is the operating manual. The hooks are run by the agent
 itself, not invoked by the model, so there is nothing here to "call" —
 what follows is how to install them, read what they decided, tune them,
 and work out why they did something.
+
+**Not every agent supports every part.** Guarding works on all three.
+Slimming and the carry-forward brief work on Claude Code and Codex;
+Antigravity's `PreToolUse` cannot rewrite a tool's arguments and it fires
+no compaction event, so neither is available there and neither is faked.
+`README.md` has the mechanism behind each gap.
 
 `README.md` next to this file has the design and the reasoning behind it.
 Read it before changing behaviour; read this before running anything.
@@ -33,10 +41,14 @@ Every path below is relative to this skill's own directory.
 
 | Path | What it is |
 | --- | --- |
-| `install.sh` | Merges the hooks into `~/.claude/settings.json` |
-| `bin/jev-hook.mjs` | The only Claude Code-specific file; one entry point for every hook event |
+| `install.sh` | Hook installer. Takes an agent name; merges into `~/.claude/settings.json` by default |
+| `install-codex.sh` | Merges the hooks into `~/.codex/hooks.json` |
+| `install-antigravity.sh` | Merges the hooks into `~/.gemini/config/hooks.json` |
+| `bin/jev-hook.mjs` | The Claude Code adapter; one entry point for every hook event |
+| `bin/jev-hook-codex.mjs` | The Codex adapter |
+| `bin/jev-hook-antigravity.mjs` | The Antigravity adapter |
 | `bin/jev-slim.mjs` | Standalone CLI — runs or filters a command and prints less of it |
-| `lib/` | The engine. No knowledge of Claude Code at all |
+| `lib/` | The engine. No knowledge of any agent at all |
 | `lib/config.mjs` | Every knob, with its default and why it is that value |
 | `test/run.mjs` | Offline suite; needs no key and no network |
 | `test/live.mjs` | Prints real judgments with latency and cost |
@@ -48,29 +60,53 @@ dependencies — these run on every tool call, so they depend on nothing.
 ## Installing
 
 ```bash
-./install.sh            # install or update
-./install.sh --check    # show what is registered
-./install.sh --remove   # take it back out
+./install.sh                   # Claude Code (the default)
+./install.sh codex             # Codex
+./install.sh antigravity       # Antigravity
+./install.sh all               # all three
+
+./install.sh codex --check     # show what is registered
+./install.sh codex --remove    # take it back out
 ```
 
-`install.sh` is the hook installer and the only one that matters here.
-`install-skill.sh` and `bin/install.js` share the name by accident: they
-copy this directory into a skills directory and register nothing.
+`install.sh` is the hook installer and the only one that matters here; it
+hands off to `install-codex.sh` and `install-antigravity.sh`, which can
+also be run directly. `install-skill.sh` and `bin/install.js` share the
+name by accident: they copy this directory into a skills directory and
+register nothing.
 
-It merges into `~/.claude/settings.json` rather than symlinking, because
-Claude Code writes to that file itself. Re-running replaces only the Jev
-entries and leaves the rest untouched, and every run backs the file up
-first. Three events get registered: `PreToolUse` (guard and slim),
-`PreCompact` (write the brief), and `SessionStart` matching `compact`
-(inject it).
+Every installer merges rather than symlinking, because each agent writes
+to its own config file. Re-running replaces only the Jev entries and
+leaves the rest untouched, and every run backs the file up first with a
+timestamped `.bak-` copy beside it.
+
+What each one registers:
+
+| Agent | Events |
+| --- | --- |
+| Claude Code | `PreToolUse` (guard and slim), `PreCompact` (write the brief), `SessionStart`/`compact` (inject it) |
+| Codex | the same three, plus `UserPromptSubmit` (remember the request) and `SessionEnd` (forget it) |
+| Antigravity | `PreToolUse` (guard only) |
+
+**Codex will not run a hook it has not been told to trust.** After
+installing, start Codex, run `/hooks`, and approve the Jev entries. Trust
+is recorded against each hook's hash, so editing this skill means
+approving them again. If the hooks appear installed but nothing is in the
+log, this is the first thing to check.
+
+**Antigravity builds do not all read the same `hooks.json`.** The
+documented path is `~/.gemini/config/hooks.json`; some builds use
+`~/.gemini/antigravity-cli/hooks.json`, and a workspace can carry its own
+`.agents/hooks.json`. Set `JEV_ANTIGRAVITY_HOOKS` to install elsewhere.
+If the log stays empty, a different file is the likely reason.
 
 **Hooks are read at session start.** After installing, removing or
 re-pointing them, a running session keeps the old configuration — start a
 new one.
 
-**`install.sh` registers whatever copy of itself it was run from.** It
+**An installer registers whatever copy of itself it was run from.** It
 resolves its own directory and writes that absolute path into the
-settings, so running it out of a skills-manager copy points the hooks at
+config, so running it out of a skills-manager copy points the hooks at
 the copy, and a later `git pull` in a checkout will not reach them. If a
 checkout is meant to be the source of truth, run `install.sh` from there,
 or install the skill as a symlink rather than a copy.
@@ -134,9 +170,23 @@ JEV_HOOKS_GUARD=0           # keep slimming, stop guarding tool calls
 JEV_HOOKS_CARRY_FORWARD=0   # stop carrying a brief past compaction
 ```
 
+Per agent, for the two places a documented contract and a shipped build
+might disagree. Leave both off until a live run says otherwise:
+
+```bash
+JEV_CODEX_SLIM_ALLOW=1            # Codex: pair the command rewrite with
+                                  # permissionDecision "allow". Needed only if
+                                  # a build ignores an unpaired updatedInput,
+                                  # and it also skips the approval prompt for
+                                  # wrapped commands.
+JEV_ANTIGRAVITY_EXPLICIT_ALLOW=1  # Antigravity: emit {"decision":"allow"}
+                                  # rather than staying silent on allowed calls
+JEV_ANTIGRAVITY_MATCHER='a|b'     # Antigravity: which tool names get a hook
+```
+
 If a user wants it off *now*, in a running session, an environment
 variable will not reach the already-started hooks reliably — run
-`./install.sh --remove` and start a new session.
+`./install.sh <agent> --remove` and start a new session.
 
 ## Reading what it decided
 
@@ -146,11 +196,17 @@ carries `hook`, `decision`, `by` (`code` or `jev`), `reason`, `signals`
 (the probability behind each hazard), `ms` and `cost_usd`. This is the
 answer to "why did that happen", and to almost every tuning question.
 
+All three agents write to the same file. Records from Codex and
+Antigravity carry an `agent` field; records with no `agent` are Claude
+Code's, which was writing to this log before there was anything to
+distinguish it from.
+
 ```bash
 LOG=~/.local/state/jev-hooks/jev-log.jsonl
 
 tail -5 "$LOG" | jq .                                      # the last few decisions
 jq 'select(.decision == "deny" or .decision == "ask")' "$LOG"
+jq 'select(.agent == "antigravity") | .tool' "$LOG" | sort -u   # real tool names
 jq -s 'map(.ms // empty) | add / length' "$LOG"            # mean latency
 jq -s 'map(.cost_usd // 0) | add' "$LOG"                   # what it has cost
 ```
@@ -184,13 +240,31 @@ raising `deny` is safer than lowering it: `ask` is cheap, `deny` is not.
 ## Troubleshooting
 
 **Nothing appears to happen.** In order: is `TYPESAFE_API_KEY` set in the
-environment Claude Code was launched from; did the session start after
-the install; does `./install.sh --check` list the hooks; is `JEV_HOOKS=0`
-set anywhere. Then look for entries in the log.
+environment the agent was launched from; did the session start after the
+install; does `./install.sh <agent> --check` list the hooks; is
+`JEV_HOOKS=0` set anywhere. Then look for entries in the log.
+
+Two more, per agent, and both are more likely than any of the above:
+
+- **Codex** — have the hooks been trusted? Run `/hooks` inside Codex.
+  Untrusted hooks are registered and do not run. Also check that
+  `~/.codex/config.toml` does not set `hooks = false` under `[features]`.
+- **Antigravity** — is the installer writing to the `hooks.json` this
+  build reads? Try `~/.gemini/antigravity-cli/hooks.json` or a
+  workspace `.agents/hooks.json` via `JEV_ANTIGRAVITY_HOOKS`. If the hook
+  runs but says nothing, the tool names in `JEV_ANTIGRAVITY_MATCHER` may
+  not match this build's; the `tool` field in the log gives the real ones.
 
 **Output was cut and the user wants the rest.** It was never lost. The
 footer carries the path to the full text on disk. Read that file rather
 than re-running the command.
+
+**Commands are not being slimmed on Antigravity.** They never will be.
+Antigravity's `PreToolUse` cannot rewrite a tool's arguments, so there is
+no mechanism to route a command through the slimmer. The workaround is a
+rules snippet that asks the agent to use `jev-slim` itself — `README.md`
+has it under "Slimming on Antigravity". Same for the carry-forward brief:
+Antigravity fires no compaction event.
 
 **A command that should not be slimmed is being slimmed.** Only commands
 on a known list get wrapped, and never when they stream, need a terminal,
@@ -211,8 +285,8 @@ not returned by then is abandoned and the call proceeds.
 
 ## Using it without the hooks
 
-`bin/jev-slim.mjs` is a plain CLI and knows nothing about Claude Code.
-`install.sh` symlinks it to `~/.local/bin/jev-slim`.
+`bin/jev-slim.mjs` is a plain CLI and knows nothing about any agent.
+Every installer symlinks it to `~/.local/bin/jev-slim`.
 
 ```bash
 jev-slim exec --task "why is the build failing" -- 'npm run build'
@@ -220,9 +294,8 @@ some-noisy-command | jev-slim filter --task "find the migration error"
 ```
 
 Any agent that can be told to prefix a command, and any shell alias, can
-use it today. Hooks are Claude Code's own mechanism — Gemini CLI and Codex
-have no equivalent, and reaching them properly needs a second adapter,
-most likely an MCP server exposing the same judgments. That is not built.
+use it today. This is also the answer for Antigravity, whose hooks cannot
+wrap a command, and for any agent with no hooks at all.
 
 ## Changing it
 
@@ -240,8 +313,15 @@ stay green. The live script is how the judgments themselves get checked —
 whether a threshold is right is not something the offline tests can
 assert.
 
-Keep `lib/` free of any Claude Code knowledge; `bin/jev-hook.mjs` is the
-only place that belongs. New questions go into an existing batched request
+Keep `lib/` free of any agent-specific knowledge; the three
+`bin/jev-hook*.mjs` adapters are where it belongs, one file each. A fourth
+agent should need a fourth file and nothing else — if it seems to need a
+change in `lib/`, that is worth questioning first.
+
+Do not assume an agent lacks an integration point because this repository
+once said so: the first version of this skill recorded that Codex had no
+hooks and that an MCP server would be the only route. Both halves were
+wrong by the time anyone checked. New questions go into an existing batched request
 where one exists: questions batched over one state are scored
 independently, so batching changes no answer and costs a single round
 trip.

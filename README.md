@@ -10,7 +10,9 @@ Enforce process discipline, automate task checklists, and manage git/issue track
   * **Install**: `npx --yes github:pde201/skills/skills/workflow/prd-lifecycle`
 
 ### 📂 intelligence
-Improve agent reasoning speeds, minimize planning latency, and support speculative branching.
+Improve agent reasoning speeds, spend less of the context window, minimize planning latency, and support speculative branching.
+* **[jev](./skills/intelligence/jev/SKILL.md)**: Claude Code hooks that slim bloated tool output, guard risky tool calls, and carry a brief across compaction, using TypeSafe's Jev for the judgments.
+  * **Install**: `npx --yes github:pde201/skills/skills/intelligence/jev`
 * **[ssd](./skills/intelligence/ssd/SKILL.md)**: One-step speculative branching to hide planning latency for slow steps in multi-step plans.
   * **Install**: `npx --yes github:pde201/skills/skills/intelligence/ssd`
 

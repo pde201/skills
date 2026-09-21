@@ -1,0 +1,25 @@
+{
+  "name": "@acuity-skills/jev",
+  "version": "1.0.0",
+  "description": "Install the jev agent skill for Codex, Claude Code, or another skills directory.",
+  "bin": {
+    "acuity-jev": "bin/install.js"
+  },
+  "files": [
+    "bin/",
+    "lib/",
+    "test/",
+    "SKILL.md",
+    "README.md",
+    "install.sh",
+    "install-skill.sh"
+  ],
+  "engines": {
+    "node": ">=16"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pde201/skills.git"
+  },
+  "license": "MIT"
+}

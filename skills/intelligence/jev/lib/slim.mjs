@@ -10,10 +10,9 @@
 //  untouched; a filter that eats a stack trace is worse than no filter.
 // ──────────────────────────────────────────────────────────────────────
 
-import { writeFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
 import { systemOne, choice, noul, score, pickChoice, pickScore, ranked, nouls, costUsd, haveKey } from "./client.mjs";
+import { createPrivateTempDir, writePrivateFile } from "./privacy.mjs";
 
 // Choice criteria cap; the docs put the practical ceiling at 255 options.
 const MAX_BLOCKS = 200;
@@ -197,11 +196,8 @@ export function stitch(blocks, keep, fullPath) {
 }
 
 function stash(text) {
-  const dir = join(tmpdir(), "jev-hooks");
-  mkdirSync(dir, { recursive: true });
-  const path = join(dir, `output-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.txt`);
-  writeFileSync(path, text, "utf8");
-  return path;
+  const path = join(createPrivateTempDir("jev-output-"), "output.txt");
+  return writePrivateFile(path, text);
 }
 
 // ── Entry point ──────────────────────────────────────────────────────

@@ -14,14 +14,20 @@
     "install.sh",
     "install-codex.sh",
     "install-antigravity.sh",
-    "install-skill.sh"
+    "install-skill.sh",
+    "references/",
+    "evals/"
   ],
   "engines": {
-    "node": ">=16"
+    "node": ">=22"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/pde201/skills.git"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/run.mjs test/client-privacy.mjs test/carryforward-regressions.mjs test/operations.mjs",
+    "eval:self-test": "node --test evals/self-test.mjs"
+  }
 }

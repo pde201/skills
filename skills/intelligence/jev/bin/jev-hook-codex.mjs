@@ -29,8 +29,9 @@
 //  in exit 0. A hook is never the reason a session fails.
 // ──────────────────────────────────────────────────────────────────────
 
-import { writeFileSync, readFileSync, unlinkSync, existsSync, realpathSync } from "node:fs";
+import { writeFileSync, readFileSync, unlinkSync, existsSync, realpathSync, renameSync } from "node:fs";
 import { join } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
@@ -67,15 +68,23 @@ const nothing = () => process.exit(0);
 
 // ── The prompt stash ─────────────────────────────────────────────────
 
-const promptPath = (sessionId) => join(stateDir(), `codex-prompt-${sessionId || "unknown"}.txt`);
+const promptPath = (sessionId) => join(stateDir(), `codex-prompt-${createHash("sha256").update(String(sessionId || "unknown")).digest("hex")}.txt`);
 
 function stashPrompt(sessionId, prompt) {
   if (typeof prompt !== "string" || !prompt.trim()) return false;
+  let temporary;
   try {
-    writeFileSync(promptPath(sessionId), prompt.slice(0, 4000), "utf8");
+    const path = promptPath(sessionId);
+    temporary = `${path}.${randomUUID()}.tmp`;
+    writeFileSync(temporary, prompt, { encoding: "utf8", mode: 0o600, flag: "wx" });
+    renameSync(temporary, path);
     return true;
   } catch {
     return false;
+  } finally {
+    if (temporary) {
+      try { unlinkSync(temporary); } catch { /* Already renamed or never created. */ }
+    }
   }
 }
 

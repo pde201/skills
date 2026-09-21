@@ -100,13 +100,13 @@ mkdir -p "$dest_base"
 rm -rf "$tmp_dir"
 mkdir -p "$tmp_dir"
 
-for name in SKILL.md README.md install.sh install-codex.sh install-antigravity.sh install-skill.sh; do
+for name in SKILL.md README.md package.json install.sh install-codex.sh install-antigravity.sh install-skill.sh; do
   [[ -f "$script_dir/$name" ]] && cp -p "$script_dir/$name" "$tmp_dir/"
 done
 
 # The installers write the absolute path of bin/jev-hook*.mjs into each
 # agent's settings, so bin/ and lib/ have to travel with SKILL.md.
-for name in bin lib test; do
+for name in bin lib test references evals; do
   [[ -d "$script_dir/$name" ]] && cp -R "$script_dir/$name" "$tmp_dir/"
 done
 rm -f "$tmp_dir/bin/install.js"

@@ -265,6 +265,33 @@ The two `*_ALLOW` variables exist because a documented hook contract and a
 shipped build are not always the same thing, and both are the kind of question
 one live session settles. Leave them off until a live run says otherwise.
 
+### A read-only call interrupts for two things only
+
+A call that changes nothing is cheap to be wrong about. A read of the wrong
+file, or of a path that was guessed, fails or wastes a few tokens and the
+model corrects itself without anyone being asked. The cost of prompting anyway
+is not the one prompt — it is that being interrupted over things that did not
+matter teaches you to wave through the one that does.
+
+So when Jev scores a call's reach below "changes something", only two hazards
+speak, for two different reasons:
+
+- **`secret_exposure`** — the damage is done by reading. A printed key has
+  already been printed by the time a prompt could be answered.
+- **`repeat_failure`** — it is itself evidence that the premise above is
+  false. A call repeating one that just failed, unchanged, is the model *not*
+  correcting itself, and a read-only loop still burns the context window all
+  of this exists to protect.
+
+The rest cannot honestly fire on a read at all: a call that changes nothing
+has destroyed nothing, and reading outside the project is explicitly not
+`wrong_scope`. Suppressing them removes false positives rather than coverage,
+and everything suppressed is still written to the log.
+
+This gate only sees calls that reached the judgment layer. The deterministic
+checks run first and return early, so `rm -rf /`, a force push and the rest of
+`CATASTROPHIC` still ask whatever reach Jev assigned.
+
 ### A question that does not apply is not asked
 
 `invented_target` asks whether a call invented "the path it names". Put to a

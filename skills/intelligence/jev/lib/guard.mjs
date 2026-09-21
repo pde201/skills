@@ -122,6 +122,14 @@ const HAZARDS = {
   },
   repeat_failure: {
     action: ASK,
+    // Speaks on a read too, and for the opposite reason to exposure: not
+    // because the read does damage, but because this hazard is the
+    // evidence that the read-only gate's premise has failed. The gate
+    // assumes a bad call fails and the model corrects itself. A call that
+    // repeats one which just failed, unchanged, is the model demonstrably
+    // not correcting itself, and a read-only loop still burns the context
+    // window that all of this exists to protect.
+    actsOnRead: true,
     question: noul(
       "Is the tool call in `call` essentially the same as one in `recent_calls` that already failed, without addressing why it failed?",
       {
@@ -142,6 +150,9 @@ const HAZARDS = {
   },
   secret_exposure: {
     action: DENY,
+    // The one hazard worth interrupting a read for: by the time anyone
+    // could answer the prompt, a printed key has already been printed.
+    actsOnRead: true,
     question: noul(
       "Would the tool call in `call` print, copy or transmit a credential, token, private key or password?",
       {
@@ -166,8 +177,7 @@ const HAZARDS = {
     // reads fails with "no such file", which the model sees and corrects
     // by itself — spending the user's attention on that buys nothing and
     // teaches them to wave the prompts through.
-    onlyWithChange: true,
-    // And only worth asking at all when there is a path to have invented.
+    // Only worth asking at all when there is a path to have invented.
     // See namesAPath below for why.
     needsPath: true,
     question: noul(
@@ -260,25 +270,62 @@ export function decide(probabilities, radius) {
   const fired = {};
 
   for (const [hazard, probability] of Object.entries(probabilities)) {
-    const { action, onlyWithChange } = HAZARDS[hazard] ?? {};
+    const { action, actsOnRead } = HAZARDS[hazard] ?? {};
     if (!action) continue;
     let level = null;
     if (probability >= config.guardDenyAt) level = action;
     else if (probability >= config.guardAskAt) level = ASK;
     if (!level) continue;
-    triggered.push({ level, onlyWithChange: Boolean(onlyWithChange) });
+    triggered.push({ hazard, level, actsOnRead: Boolean(actsOnRead) });
     fired[hazard] = probability;
   }
 
-  // A hazard marked `onlyWithChange` cannot stop a call on its own when
-  // nothing is being changed. It still speaks when something else fired,
-  // where it corroborates rather than accuses.
-  if ((radius?.score ?? 0) < CHANGES_SOMETHING && !triggered.some((t) => !t.onlyWithChange)) {
+  // A call that changes nothing is cheap to be wrong about. A read of the
+  // wrong file, or of a path that was guessed, fails or wastes a few
+  // tokens and the model corrects itself without anyone being asked. The
+  // cost of prompting anyway is not the one prompt: it is that being
+  // interrupted over things that did not matter teaches you to wave
+  // through the one that does.
+  //
+  // So on a read-only call, only hazards marked `actsOnRead` speak, and
+  // there are exactly two reasons to earn that mark:
+  //
+  //   · the damage is done by reading — `secret_exposure`, because a
+  //     printed key has already been printed by the time a prompt could
+  //     be answered; and
+  //   · the hazard is itself evidence that the premise above is false —
+  //     `repeat_failure`, because a call repeating one that just failed
+  //     is the model not correcting itself.
+  //
+  // The rest cannot honestly fire on a read at all — a call that changes
+  // nothing has destroyed nothing, and reading outside the project is
+  // explicitly not `wrong_scope` — so suppressing them removes false
+  // positives rather than coverage.
+  //
+  // This gate only ever sees calls that reached the judgment layer. The
+  // deterministic checks run first and return early, so `rm -rf /`, a
+  // force push and the rest of CATASTROPHIC still ask no matter what
+  // reach Jev assigned.
+  if ((radius?.score ?? 0) < CHANGES_SOMETHING) {
+    const speaking = triggered.filter((t) => t.actsOnRead);
+
     // Allowed — but hand back what was set aside rather than dropping it.
     // A hazard suppressed silently is a hazard nobody can tune: the log is
     // the only trace of a judgment that never became a prompt, and a
     // suppression that turns out to be wrong is invisible without it.
-    return { decision: ALLOW, fired: {}, suppressed: { ...fired } };
+    if (!speaking.length) return { decision: ALLOW, fired: {}, suppressed: { ...fired } };
+
+    const kept = {};
+    const setAside = {};
+    for (const [hazard, probability] of Object.entries(fired)) {
+      if (speaking.some((t) => t.hazard === hazard)) kept[hazard] = probability;
+      else setAside[hazard] = probability;
+    }
+    return {
+      decision: strictest(speaking.map((t) => t.level)),
+      fired: kept,
+      ...(Object.keys(setAside).length ? { suppressed: setAside } : {}),
+    };
   }
 
   // Reach is a multiplier, not a hazard of its own: something already

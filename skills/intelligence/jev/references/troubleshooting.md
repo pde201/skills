@@ -22,6 +22,13 @@ request the API rejected as malformed. That is a bug in this layer, not a
 tuning problem; the outbound body is redacted before it is sent, so check that
 redaction has not altered the request's structure.
 
+`jev unavailable: TypeSafe request failed after N attempt(s): …` names what
+went wrong on the last attempt: `TypeSafe 503` is a provider outage, `fetch
+failed ENOTFOUND` is the network, `timed out after M ms per attempt` is
+latency. All three fail open, and the wrapped command still ran; the cost is
+the wait, up to `(JEV_RETRIES + 1) × JEV_TIMEOUT_MS` per judgment while the
+provider is degraded.
+
 ## Recover output
 
 Use the exact Jev footer path and inspect the needed range. If the file is gone,

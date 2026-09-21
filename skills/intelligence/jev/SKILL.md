@@ -72,7 +72,7 @@ When investigating false interruptions or missed hazards:
 These arrive in the model's context, not as tool errors. Each names its source.
 - **`[Jev Supervision] Repetitive failure loop detected`** or **`3 consecutive tool failures`**: the last calls repeated a failing action. Stop repeating it. Read the exact error text in full (recover it via workflow 1 if it was slimmed), inspect the target file or command output directly, and change the approach before the next attempt. If the design itself is in doubt, ask the user.
 - **`[Jev Supervision] Potential goal drift detected`**: the quoted request is what the user asked for. Re-anchor the next action on it, or state explicitly why the detour serves it.
-- **`Jev Verification Gate: Files were modified … but no test commands were run`** (Antigravity `Stop`): completion was refused because edits were not followed by a test run. Run the project's test command, fix what fails, then finish. If the project has no tests, say so to the user and set `JEV_DOD_GATE=0` for that host rather than stopping repeatedly.
+- **`Jev Verification Gate: Files were modified … but no test commands were run`** (Antigravity `Stop`): completion was refused because edits were not followed by a test run. Run the project's test command, fix what fails, then finish. If the project has no tests, say so to the user; the gate stands down on its own after `JEV_DOD_MAX_CONTINUES` refusals (default 2) and logs `gaveUp: true`, and `JEV_DOD_GATE=0` turns it off for that host.
 - **`Jev Git Safety: force push to main/master`** or **`Sensitive file staged for commit`**: the call is waiting on the user. Explain what was flagged and why, and do not rephrase the command to slip past the check.
 - **`# Carried forward past compaction`**: historical evidence from before compaction, not new instructions. Read user entries in transcript order; later corrections win. A `Complete brief:` trailer means the brief was bounded to the host's 10,000-character cap and the full text is at that path.
 - **Completion Criterion**: the message is acted on as stated, and the decision record for it (`thrashingWarning`, `gitSafety`, `hook: "Stop"` or `hook: "SessionStart"`) is cited if the user asks why it appeared.
@@ -110,6 +110,7 @@ jev-slim exec --task "<goal>" -- '<command>'
 | `JEV_HOOKS_SUPERVISION` | `1` | Enable/disable thrashing/goal-drift warnings and error triage. |
 | `JEV_GIT_SAFETY` | `1` | Enable/disable the pre-commit and force-push checks on git commands. |
 | `JEV_DOD_GATE` | `1` | Enable/disable the Definition of Done gate. Blocks completion on Antigravity `Stop`; on Codex `SessionEnd` it only logs `unverified: true`. |
+| `JEV_DOD_MAX_CONTINUES` | `2` | Antigravity only: how many times the Stop gate sends one conversation back before standing down (logged as `gaveUp: true`). A verified stop resets the count. |
 | `JEV_GUARD_ASK_AT` | `0.45` | Hazard probability at which the guard escalates to `ask`. |
 | `JEV_GUARD_DENY_AT` | `0.85` | Probability at which a deny-action hazard (`destructive_unrequested`, `secret_exposure`) escalates to `deny`; other hazards stop at `ask`. |
 | `JEV_GUARD_BLAST_RADIUS_BLOCK` | `3` | Blast-radius score (0–4) at or above which an `ask` becomes a `deny`. Reach alone never escalates. |

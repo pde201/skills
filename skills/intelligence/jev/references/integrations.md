@@ -60,7 +60,7 @@ names registered by its installer.
   - **PreToolUse**: deterministic checks, git pre-commit/force-push safety, and command output slimming via `overwrite: { CommandLine: ... }`, which Antigravity requires to be paired with `decision: "allow"`; an untripped call gets no output unless `JEV_ANTIGRAVITY_EXPLICIT_ALLOW=1`.
   - **PreInvocation**: injects single-use carry-forward briefs across compaction and alerts on repeated tool thrashing or goal drift via `injectSteps`.
   - **PostToolUse**: classifies tool execution errors into structured categories and logs diagnostics. Registered for the same tool matcher as PreToolUse rather than `*`.
-  - **Stop**: Definition of Done gate preventing completion via `decision: "continue"` if files were edited without subsequent test verification. There is no loop guard yet: a session that cannot run tests should set `JEV_DOD_GATE=0`.
+  - **Stop**: Definition of Done gate preventing completion via `decision: "continue"` if files were edited without subsequent test verification. It sends one conversation back at most `JEV_DOD_MAX_CONTINUES` times (default 2), keyed by `conversationId`, then stands down and logs `gaveUp: true`; a verified stop resets the count. The counter lives in `JEV_STATE_DIR` as `dod-continues-<hash>.json`.
   - **Skill packaging**: `./install-skill.sh antigravity` installs directly to `~/.gemini/config/skills/jev`.
 
 Restart the target host after registration or environment changes. Verify in

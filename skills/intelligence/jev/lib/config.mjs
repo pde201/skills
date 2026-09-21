@@ -33,6 +33,9 @@ export const config = {
   carryForward: bool("JEV_HOOKS_CARRY_FORWARD", true),
   supervision: bool("JEV_HOOKS_SUPERVISION", true),
   dodGate: bool("JEV_DOD_GATE", true),
+  // How many times the Stop gate may send the agent back before standing
+  // down for that conversation. Claude Code caps its own Stop hooks at 8.
+  dodMaxContinues: num("JEV_DOD_MAX_CONTINUES", 2),
   gitSafety: bool("JEV_GIT_SAFETY", true),
   thrashingThreshold: num("JEV_THRASHING_THRESHOLD", 0.75),
 

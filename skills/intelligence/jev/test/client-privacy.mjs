@@ -224,6 +224,40 @@ test("free-text redaction covers environment-style names and prefixed tokens", a
   assert.equal(redactText("npm run build --workspace=api"), "npm run build --workspace=api", "ordinary text is untouched");
 });
 
+test("a failed request names its cause: provider status, network error, or timeout", async () => {
+  const question = noul("Is this a greeting?");
+
+  globalThis.fetch = async () => ({ ok: false, status: 503, async text() { return "upstream unavailable"; } });
+  await assert.rejects(systemOne({ state: "hi", questions: { q: question }, retries: 1 }), (error) => {
+    assert.ok(error instanceof JevUnavailable);
+    assert.match(error.message, /after 2 attempt\(s\): TypeSafe 503/);
+    return true;
+  });
+
+  globalThis.fetch = async () => {
+    const failure = new TypeError("fetch failed");
+    failure.cause = { code: "ENOTFOUND" };
+    throw failure;
+  };
+  await assert.rejects(systemOne({ state: "hi", questions: { q: question }, retries: 0 }), (error) => {
+    assert.match(error.message, /after 1 attempt\(s\): fetch failed ENOTFOUND/);
+    return true;
+  });
+
+  globalThis.fetch = (_url, { signal }) =>
+    new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        const aborted = new Error("This operation was aborted");
+        aborted.name = "AbortError";
+        reject(aborted);
+      });
+    });
+  await assert.rejects(systemOne({ state: "hi", questions: { q: question }, retries: 0, timeoutMs: 20 }), (error) => {
+    assert.match(error.message, /timed out after 20 ms per attempt/);
+    return true;
+  });
+});
+
 test("decision logs are redacted and private", () => {
   logDecision({ token: "log-secret", ssn: "123-45-6789", message: "password=log-password" });
   const path = join(stateDir(), "jev-log.jsonl");

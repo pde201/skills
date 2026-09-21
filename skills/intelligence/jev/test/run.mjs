@@ -42,6 +42,17 @@ test("denoise is lossless for ordinary text", () => {
   assert.equal(denoise(text), text);
 });
 
+test("denoise keeps the last redraw of a carriage-return line and never drops lines by content", () => {
+  const churn = ["progress 10%\rprogress 50%\rprogress 100%", "done\r", "⠋ installing", " 45% |████     | 12/27", "100% tests passed, 0 tests failed"].join("\n");
+  assert.deepEqual(denoise(churn).split("\n"), [
+    "progress 100%",
+    "done",
+    "⠋ installing",
+    " 45% |████     | 12/27",
+    "100% tests passed, 0 tests failed",
+  ]);
+});
+
 // ── blocks ───────────────────────────────────────────────────────────
 
 test("toBlocks covers every line exactly once", () => {
@@ -947,6 +958,51 @@ test("antigravity: Stop hook blocks completion when changes lack verification", 
 
   // disabled DoD knob does not block
   assert.equal(runAgy(stopEvent, { JEV_DOD_GATE: "0" }), null);
+});
+
+test("antigravity: the Stop gate sends a conversation back a bounded number of times, then stands down", () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "agy-stop-loop-"));
+  const transcriptPath = join(tmpDir, "edited.jsonl");
+  writeFileSync(transcriptPath, JSON.stringify({
+    source: "MODEL",
+    type: "GENERIC",
+    tool_calls: [{ name: "write_to_file", args: { TargetFile: "/a/b.ts" } }],
+  }) + "\n");
+  const stopEvent = { executionNum: 1, terminationReason: "model_stop", transcriptPath, conversationId: "loop-guard-test" };
+  const env = { JEV_DOD_MAX_CONTINUES: "2" };
+
+  const first = runAgy(stopEvent, env);
+  assert.equal(first?.decision, "continue");
+  assert.match(first.reason, /stop asking after 2 attempts/);
+  assert.equal(runAgy(stopEvent, env)?.decision, "continue", "second refusal");
+
+  const before = logCount();
+  assert.equal(runAgy(stopEvent, env), null, "third stop: the gate stands down rather than loop forever");
+  const gaveUp = logRecordsSince(before).find((r) => r.hook === "Stop" && r.gaveUp);
+  assert.ok(gaveUp, "standing down is recorded, not silent");
+  assert.equal(gaveUp.continues, 2);
+
+  // The counter was cleared, so a later unverified stop is gated afresh.
+  assert.equal(runAgy(stopEvent, env)?.decision, "continue");
+});
+
+test("antigravity: a verified stop clears the Stop gate counter", () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "agy-stop-clear-"));
+  const unverified = join(tmpDir, "unverified.jsonl");
+  writeFileSync(unverified, JSON.stringify({
+    source: "MODEL", type: "GENERIC", tool_calls: [{ name: "write_to_file", args: { TargetFile: "/a/b.ts" } }],
+  }) + "\n");
+  const verified = join(tmpDir, "verified.jsonl");
+  writeFileSync(verified, [
+    { source: "MODEL", type: "GENERIC", tool_calls: [{ name: "write_to_file", args: { TargetFile: "/a/b.ts" } }] },
+    { source: "MODEL", type: "GENERIC", tool_calls: [{ name: "run_command", args: { CommandLine: "npm test" } }] },
+  ].map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const key = { conversationId: "clear-test", executionNum: 1, terminationReason: "model_stop" };
+
+  assert.equal(runAgy({ ...key, transcriptPath: unverified }, { JEV_DOD_MAX_CONTINUES: "1" })?.decision, "continue");
+  assert.equal(runAgy({ ...key, transcriptPath: verified }, { JEV_DOD_MAX_CONTINUES: "1" }), null, "tests ran: allowed");
+  // Had the counter survived, this would already be past the limit and pass silently.
+  assert.equal(runAgy({ ...key, transcriptPath: unverified }, { JEV_DOD_MAX_CONTINUES: "1" })?.decision, "continue");
 });
 
 test("antigravity: PostToolUse responds with empty object", () => {

@@ -128,7 +128,12 @@ export async function systemOne({
     if (attempt < retries) await sleep(120 * 2 ** attempt);
   }
 
-  throw new JevUnavailable("TypeSafe request failed", lastError);
+  // The log records only this message, so it has to carry the cause: a
+  // provider 503, a timeout and a DNS failure call for different responses.
+  const why = lastError?.name === "AbortError"
+    ? `timed out after ${timeoutMs} ms per attempt`
+    : [lastError?.message, lastError?.cause?.code].filter(Boolean).join(" ") || "unknown error";
+  throw new JevUnavailable(`TypeSafe request failed after ${retries + 1} attempt(s): ${why}`, lastError);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

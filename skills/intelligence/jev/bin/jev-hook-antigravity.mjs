@@ -20,9 +20,10 @@
 //  Fails open, always exit 0, same as every other entry point here.
 // ──────────────────────────────────────────────────────────────────────
 
-import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { realpathSync, readFileSync, unlinkSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { createHash } from "node:crypto";
 
 import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
 import { shouldWrap, rewrite } from "../lib/wrap.mjs";
@@ -34,7 +35,8 @@ import {
   checkGitSafety,
 } from "../lib/supervision.mjs";
 import { latestUserRequest, recentToolCalls, observedPaths } from "../lib/transcript.mjs";
-import { logDecision } from "../lib/log.mjs";
+import { logDecision, stateDir } from "../lib/log.mjs";
+import { writePrivateFile } from "../lib/privacy.mjs";
 import config from "../lib/config.mjs";
 
 // Saying `{"decision":"allow"}` on a call that tripped nothing would
@@ -226,6 +228,37 @@ async function preInvocation(event) {
 }
 
 // ── Stop (Definition of Done Gate) ───────────────────────────────────
+//
+// A gate that says "continue" every time the agent stops is a loop when
+// the agent cannot satisfy it — a docs-only change in a project with no
+// test suite, for instance. So the gate counts how often it has sent one
+// conversation back and stands down after config.dodMaxContinues, saying
+// so in the log. Antigravity has no `stop_hook_active` to lean on.
+
+const dodCounterPath = (key) =>
+  join(stateDir(), `dod-continues-${createHash("sha256").update(String(key || "unknown")).digest("hex")}.json`);
+
+function dodContinues(key) {
+  try {
+    return Number(JSON.parse(readFileSync(dodCounterPath(key), "utf8")).count) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+function recordDodContinue(key) {
+  const count = dodContinues(key) + 1;
+  try {
+    writePrivateFile(dodCounterPath(key), JSON.stringify({ count, at: new Date().toISOString() }));
+  } catch {
+    // A counter that cannot be written fails towards standing down, below.
+  }
+  return count;
+}
+
+function clearDodContinues(key) {
+  try { unlinkSync(dodCounterPath(key)); } catch { /* nothing recorded */ }
+}
 
 async function stopHook(event) {
   if (!config.dodGate) return nothing();
@@ -235,23 +268,43 @@ async function stopHook(event) {
     return nothing();
   }
 
+  const key = event.conversationId || event.transcriptPath || "unknown";
   try {
     const res = await checkDefinitionOfDone({
       transcriptPath: event.transcriptPath,
     });
 
-    if (!res.allow) {
+    if (res.allow) {
+      clearDodContinues(key);
+      return nothing();
+    }
+
+    const sentBack = dodContinues(key);
+    if (sentBack >= config.dodMaxContinues) {
       logDecision({
         agent: "antigravity",
         hook: "Stop",
-        blocked: true,
+        blocked: false,
+        gaveUp: true,
+        continues: sentBack,
         reason: res.reason,
       });
-      return emit({
-        decision: "continue",
-        reason: res.reason,
-      });
+      clearDodContinues(key);
+      return nothing();
     }
+
+    const count = recordDodContinue(key);
+    logDecision({
+      agent: "antigravity",
+      hook: "Stop",
+      blocked: true,
+      continues: count,
+      reason: res.reason,
+    });
+    return emit({
+      decision: "continue",
+      reason: `${res.reason} (Jev will stop asking after ${config.dodMaxContinues} attempts; set JEV_DOD_GATE=0 if this project has no tests.)`,
+    });
   } catch {}
 
   return nothing();

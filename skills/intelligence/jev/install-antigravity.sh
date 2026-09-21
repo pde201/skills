@@ -129,13 +129,11 @@ fi
 cat <<EOF
 
 ────────────────────────────────────────────────────────────────────
-  Installed. Restart Antigravity to pick the hook up.
+  Installed. Restart Antigravity to pick the hooks up.
 
-  Guarding only. Antigravity's PreToolUse can block a call but cannot
-  rewrite its arguments, so commands are not slimmed automatically, and
-  no event fires around compaction, so there is no carry-forward brief.
-  README.md has a rules snippet that gets the agent to reach for
-  jev-slim itself.
+  Registered capabilities:
+  - PreToolUse: command slimming (via overwrite) & safety guarding
+  - PreInvocation: single-use context carry-forward briefs
 
   If this build reads a different hooks.json, check:
 

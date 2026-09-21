@@ -106,6 +106,60 @@ export TYPESAFE_API_KEY="$(op read 'op://Private/TYPESAFE_API_KEY/credential')" 
 With no key set, every hook is inert and the session behaves exactly as if
 none of this were installed.
 
+## Verify
+
+Three checks, from cheapest to most convincing.
+
+**1. Registration.** Confirm each agent's config actually lists the jev
+entries:
+
+```bash
+~/.claude/skills/jev/install.sh --check              # Claude Code
+~/.claude/skills/jev/install.sh codex --check         # Codex
+~/.claude/skills/jev/install.sh antigravity --check   # Antigravity
+```
+
+**2. Behavior.** Registration only proves the config was written; it says
+nothing about whether the hook runs or the key works. Pipe a synthetic event
+straight into an adapter and read its exit code and stdout — a silent exit 0
+is an explicit "allow", a JSON payload on stdout is a rewrite or a verdict:
+
+```bash
+# Claude Code — benign command, expect exit 0 and no output (allow)
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"}}' \
+  | node ~/.claude/skills/jev/bin/jev-hook.mjs; echo "exit:$?"
+
+# Claude Code — obviously destructive command, expect a permissionDecision of ask or deny
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' \
+  | node ~/.claude/skills/jev/bin/jev-hook.mjs
+
+# Codex
+echo '{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"},"session_id":"verify","cwd":"/tmp"}' \
+  | node ~/.claude/skills/jev/bin/jev-hook-codex.mjs; echo "exit:$?"
+
+# Antigravity
+echo '{"toolCall":{"name":"run_command","args":{"CommandLine":"echo hi","Cwd":"/tmp"}},"workspacePaths":["/tmp"]}' \
+  | node ~/.claude/skills/jev/bin/jev-hook-antigravity.mjs; echo "exit:$?"
+```
+
+Every adapter always exits 0 — a hook must never be the reason a session
+fails — so the signal to read is stdout, not the exit code.
+
+**3. It actually asked Jev, not a stub.** Tail the decision log after the
+commands above. A real call carries `"by":"jev"`, computed `probabilities`,
+and a non-zero `cost_usd`; `"by":"code"` or a missing entry means the
+deterministic layer or nothing handled it — check `TYPESAFE_API_KEY` if you
+expected the model to weigh in:
+
+```bash
+tail -n 5 ~/.local/state/jev-hooks/jev-log.jsonl
+```
+
+Codex needs one more step before any of this runs for real: start Codex, run
+`/hooks`, and approve the jev entries. The commands above bypass that trust
+gate by invoking the adapter directly, which is why they work even before
+approval — they verify the code path, not Codex's willingness to run it.
+
 ## What each hook does
 
 ### Bloated output → `PreToolUse`, rewriting the command

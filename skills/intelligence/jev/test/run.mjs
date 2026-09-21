@@ -632,10 +632,10 @@ test("antigravity: an ordinary command produces no output at all", () => {
   assert.equal(runAgy(agyCall("run_command", { CommandLine: "echo hello", Cwd: process.cwd() })), null);
 });
 
-test("antigravity: a bloated command is rewritten via overwrite and never self-approves", () => {
+test("antigravity: a bloated command is rewritten via overwrite and decision allow", () => {
   const result = runAgy(agyCall("run_command", { CommandLine: "npm test" }));
   assert.ok(result.overwrite?.CommandLine?.includes("jev-slim.mjs"));
-  assert.equal(result.decision, undefined, "rewriting must not self-approve");
+  assert.equal(result.decision, "allow", "antigravity requires decision allow when rewriting arguments");
 });
 
 test("antigravity: a catastrophic command asks before it runs", () => {

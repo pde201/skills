@@ -154,9 +154,10 @@ async function preToolUse(event) {
         matched: why,
         command: command.slice(0, 200),
       });
-      return EXPLICIT_ALLOW
-        ? emit({ decision: "allow", overwrite: { CommandLine: updated } })
-        : emit({ overwrite: { CommandLine: updated } });
+      // In Antigravity, PreToolUse output requires a valid `decision`. If JSON
+      // is emitted without `decision`, Antigravity fails closed and denies the call.
+      // Emitting decision: "allow" alongside `overwrite` allows the rewritten command to proceed.
+      return emit({ decision: "allow", overwrite: { CommandLine: updated } });
     }
   }
 

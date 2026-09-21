@@ -34,7 +34,7 @@ import {
   triageToolError,
   checkGitSafety,
 } from "../lib/supervision.mjs";
-import { latestUserRequest, recentToolCalls, observedPaths } from "../lib/transcript.mjs";
+import { latestUserRequest, recentToolCalls, observedPaths, writtenDirs } from "../lib/transcript.mjs";
 import { logDecision, stateDir } from "../lib/log.mjs";
 import { writePrivateFile } from "../lib/privacy.mjs";
 import config from "../lib/config.mjs";
@@ -150,6 +150,9 @@ async function preToolUse(event) {
       task,
       recentCalls: recentToolCalls(transcriptPath),
       observed: observedPaths(transcriptPath),
+      // Antigravity names its workspace folders; they are the workspace.
+      hostRoots: Array.isArray(workspacePaths) ? workspacePaths : [],
+      writtenDirs: writtenDirs(transcriptPath),
     });
 
     logDecision({

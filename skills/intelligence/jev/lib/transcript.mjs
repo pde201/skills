@@ -7,6 +7,7 @@
 // ──────────────────────────────────────────────────────────────────────
 
 import { readFileSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 
 const MAX_BYTES = 4_000_000;
 
@@ -143,6 +144,27 @@ function summarizeInput(input) {
   if (typeof input.pattern === "string") return input.pattern;
   if (typeof input.Pattern === "string") return input.Pattern;
   return JSON.stringify(input).slice(0, 300);
+}
+
+const FILE_WRITE_TOOLS = new Set([
+  "Edit", "Write", "NotebookEdit", "MultiEdit",                          // Claude Code, Codex aliases
+  "replace_file_content", "edit_file", "write_to_file", "create_file",   // Antigravity
+]);
+
+/**
+ * Directories this session has already changed files in, with the host's
+ * blessing (the call succeeded, so any permission prompt was answered).
+ * They are part of the workspace for scope judgments: a project's sibling
+ * checkout, a scratch directory, wherever the work actually is.
+ */
+export function writtenDirs(path) {
+  const dirs = new Set();
+  for (const call of recentToolCalls(path, { limit: 400 })) {
+    if (call.failed || !FILE_WRITE_TOOLS.has(call.tool)) continue;
+    // summarizeInput hands back file_path / TargetFile for these tools.
+    if (typeof call.input === "string" && /^(\/|~)/.test(call.input)) dirs.add(dirname(call.input));
+  }
+  return [...dirs].slice(0, 50);
 }
 
 /** Every file path this session has successfully touched — used to spot invented paths. */

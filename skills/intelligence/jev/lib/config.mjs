@@ -61,6 +61,11 @@ export const config = {
   guardDenyAt: num("JEV_GUARD_DENY_AT", 0.85),
   guardBlastRadiusBlock: num("JEV_GUARD_BLAST_RADIUS_BLOCK", 3),
 
+  // Extra directories that count as the workspace for `wrong_scope`, on top
+  // of the cwd, the host's workspace folders, the directories this session
+  // has already written to, and the temp directory. Comma-separated; `~` ok.
+  workspaceRoots: list("JEV_WORKSPACE_ROOTS", []),
+
   // A Read changes nothing, so by default it gets the deterministic checks
   // only (existence, directory, credential-shaped path) and no model call.
   // On real sessions 26 of 26 Read judgments were allowed at ~300 ms each.

@@ -33,8 +33,9 @@ When a tool call is blocked (`deny`) or requires user escalation (`ask`):
 2. Identify the decider (`by`):
    - `by: "code"`: Deterministic check triggered (e.g. non-existent file path, absent/ambiguous edit string, directory read, a Read of a credential-shaped path such as `.env` or `id_rsa`, catastrophic shell pattern such as `rm -rf /`, `--no-preserve-root`, `git push --force`/`-f`, `git reset --hard`, `curl | sh`). Fix the tool arguments in the agent prompt. Reads get deterministic checks only unless `JEV_GUARD_READ_MODEL=1`; their record says `read-only tool: deterministic checks only`.
    - `by: "jev"`: Model probability threshold crossed. Every hazard asks at `JEV_GUARD_ASK_AT` (default 0.45); the two deny-action hazards (`destructive_unrequested`, `secret_exposure`) deny at `JEV_GUARD_DENY_AT` (default 0.85), the rest never exceed `ask`. Inspect `signals` for the fired hazard scores, `signals.suppressed` for hazards set aside, and `signals.blast_radius` (0–4, with `blast_radius_label`) for reach. Reach never fires alone: at or above `JEV_GUARD_BLAST_RADIUS_BLOCK` (default 3) it upgrades an existing `ask` to `deny`.
-3. Validate against read-only invariant:
+3. Validate against the two applicability rules:
    - Calls Jev scores as read-only (`blast_radius` below 1) are interrupted ONLY for `secret_exposure` or `repeat_failure`. All other read hazards are suppressed to prevent interruption fatigue.
+   - `wrong_scope` is judged against `workspace_roots`, not `cwd` alone: the working directory, the host's workspace folders (Antigravity `workspacePaths`), directories this session has already written to, the temp directory, and `JEV_WORKSPACE_ROOTS`. A file edit whose target lies inside them is never asked about and shows up in `signals.not_asked`; shell commands are always asked, since their reach is not knowable from a path.
 4. **Completion Criterion**: State whether the decision originated from deterministic code or model probability, cite the exact hazard/path, and provide the corrective parameter.
 
 ### 3. Install and Verify Hooks
@@ -64,7 +65,7 @@ When investigating false interruptions or missed hazards:
    ```
 2. Diagnose in strict order:
    - **Applicability**: Check if the question should have been skipped (listed in `signals.not_asked`).
-   - **Question Semantics**: Verify the wording. (e.g., asking whether a target was "seen" flags legitimate derived files; asking whether it was "fabricated" isolates guesses).
+   - **Question Semantics**: Verify the wording. (e.g., asking whether a target was "seen" flags legitimate derived files; asking whether it was "fabricated" isolates guesses. Asking whether a call reaches outside `cwd` flagged every sibling checkout and scratch directory, 33 of 57 asks on one machine; asking about `workspace_roots` does not.)
    - **Threshold Values**: Override via environment first (`JEV_GUARD_ASK_AT`, `JEV_GUARD_DENY_AT`, `JEV_GUARD_BLAST_RADIUS_BLOCK`, `JEV_THRASHING_THRESHOLD`) and only change the defaults in `lib/config.mjs` after verifying applicability and semantics across a multi-turn evaluation set.
 3. **Completion Criterion**: The revised question or threshold passes `npm run eval` (22 offline cases) without regressing `npm run eval:live`. Never adjust thresholds based on fewer than 10 labeled traces; the shipped `evals/traces/held-out-sample.json` holds 3 and is a format example, not a sufficient set.
 
@@ -115,6 +116,7 @@ jev-slim exec --task "<goal>" -- '<command>'
 | `JEV_GUARD_DENY_AT` | `0.85` | Probability at which a deny-action hazard (`destructive_unrequested`, `secret_exposure`) escalates to `deny`; other hazards stop at `ask`. |
 | `JEV_GUARD_BLAST_RADIUS_BLOCK` | `3` | Blast-radius score (0–4) at or above which an `ask` becomes a `deny`. Reach alone never escalates. |
 | `JEV_GUARD_READ_MODEL` | `0` | `1` sends Read calls to the model as well. Off, a Read gets the deterministic checks only, asking on credential-shaped paths. |
+| `JEV_WORKSPACE_ROOTS` | *(empty)* | Comma-separated directories (`~` allowed) that always count as the workspace for `wrong_scope`, on top of the cwd, host workspace folders, directories already written to this session, and the temp directory. |
 | `JEV_THRASHING_THRESHOLD` | `0.75` | Probability above which a thrashing/drift warning is injected. |
 | `JEV_SLIM_MIN_LINES` | `60` | Output shorter than this is never slimmed. |
 | `JEV_SLIM_COMMANDS` | npm, pytest, cargo, kubectl, find, rg, curl, … (see `lib/config.mjs`) | Comma-separated binaries whose output is routed through the slimmer. git, gh, grep and ls are not in the default: on real sessions they were 53 of 59 wrapped commands and slimmed nothing. |

@@ -43,7 +43,7 @@ import {
   triageToolError,
   checkGitSafety,
 } from "../lib/supervision.mjs";
-import { latestUserRequest, recentToolCalls, observedPaths } from "../lib/transcript.mjs";
+import { latestUserRequest, recentToolCalls, observedPaths, writtenDirs } from "../lib/transcript.mjs";
 import { logDecision, stateDir } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
 
@@ -198,6 +198,7 @@ async function preToolUse(event) {
       task,
       recentCalls: recentToolCalls(event.transcript_path),
       observed: observedPaths(event.transcript_path),
+      writtenDirs: writtenDirs(event.transcript_path),
     });
   }
 

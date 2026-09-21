@@ -1150,6 +1150,78 @@ test("a call that does name a path is asked about it as before", () => {
   assert.ok("invented_target" in asked);
 });
 
+// ── what counts as the workspace ─────────────────────────────────────
+//
+// `wrong_scope` judged against `cwd` alone read a sibling checkout, a
+// scratch directory and a skill under ~/.claude as "outside the project":
+// 33 of 57 asks on real sessions, none of them a hazard. The workspace is
+// wider than the cwd, and for a file tool it is knowable from the path.
+
+const { workspaceRoots, insideWorkspace, targetPaths } = await import("../lib/guard.mjs");
+const { writtenDirs } = await import("../lib/transcript.mjs");
+const { tmpdir: osTmpdir, homedir: osHomedir } = await import("node:os");
+
+test("the workspace is the cwd, the host's folders, directories already written to, and temp", () => {
+  const scratch = join(osHomedir(), "scratch", "skill", "lib");
+  const roots = workspaceRoots({ cwd: "/srv/app", hostRoots: ["/srv/shared/"], writtenDirs: [scratch] });
+  for (const expected of ["/srv/app", "/srv/shared", scratch, osTmpdir().replace(/\/+$/, ""), "/tmp", "/private/tmp"]) {
+    assert.ok(roots.includes(expected), `${expected} should be a root`);
+  }
+});
+
+test("insideWorkspace respects directory boundaries, ~, relative paths and /private aliases", () => {
+  const scratch = join(osHomedir(), "scratch", "skill", "lib");
+  const roots = workspaceRoots({ cwd: "/srv/app", writtenDirs: [scratch] });
+  assert.equal(insideWorkspace("/srv/app/src/x.ts", roots), true);
+  assert.equal(insideWorkspace("/srv/app", roots), true, "the root itself");
+  assert.equal(insideWorkspace("/srv/application/x.ts", roots), false, "a sibling that merely shares a prefix");
+  assert.equal(insideWorkspace("src/x.ts", roots, "/srv/app"), true, "relative to the cwd");
+  assert.equal(insideWorkspace("~/scratch/skill/lib/a.mjs", roots), true, "~ expands");
+  assert.equal(insideWorkspace("/private/tmp/build/out.txt", roots), true, "macOS spells /tmp two ways");
+  assert.equal(insideWorkspace("/etc/hosts", roots), false);
+  assert.equal(insideWorkspace(join(osHomedir(), ".zshrc"), roots), false);
+});
+
+test("targetPaths knows which files a call would change", () => {
+  assert.deepEqual(targetPaths("Edit", { file_path: "/a/b.ts", old_string: "x", new_string: "y" }), ["/a/b.ts"]);
+  assert.deepEqual(targetPaths("NotebookEdit", { notebook_path: "/a/n.ipynb" }), ["/a/n.ipynb"]);
+  assert.deepEqual(
+    targetPaths("apply_patch", { patch: "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-x\n+y\n*** Add File: src/b.ts\n+z\n*** Delete File: old.ts\n*** End Patch" }),
+    ["src/a.ts", "src/b.ts", "old.ts"],
+  );
+  assert.deepEqual(targetPaths("Bash", { command: "cp a /etc/b" }), [], "a shell command's reach is not knowable from a path");
+  assert.deepEqual(targetPaths("Edit", {}), []);
+});
+
+test("wrong_scope is not asked about a file change inside the workspace, and always asked about a shell command", () => {
+  const scratch = join(osHomedir(), "scratch", "skill", "lib");
+  const roots = workspaceRoots({ cwd: "/srv/app", writtenDirs: [scratch] });
+  const call = (toolName, input) => ({ toolName, input, cwd: "/srv/app" });
+
+  assert.ok(!("wrong_scope" in guardQuestions(call("Edit", { file_path: "/srv/app/src/a.ts" }), roots)), "inside the cwd");
+  assert.ok(!("wrong_scope" in guardQuestions(call("Write", { file_path: join(scratch, "b.mjs") }), roots)), "inside a directory this session already wrote to");
+  assert.ok(!("wrong_scope" in guardQuestions(call("apply_patch", { patch: "*** Update File: src/a.ts\n" }), roots)), "a patch that stays inside the cwd");
+  assert.ok("wrong_scope" in guardQuestions(call("Edit", { file_path: join(osHomedir(), ".zshrc") }), roots), "outside: the model decides, with the task in hand");
+  assert.ok("wrong_scope" in guardQuestions(call("apply_patch", { patch: "*** Update File: src/a.ts\n*** Add File: /etc/motd\n" }), roots), "one target outside is enough to ask");
+  assert.ok("wrong_scope" in guardQuestions(call("Bash", { command: "cp a /srv/app/b" }), roots), "a shell command can reach anywhere");
+  assert.ok("wrong_scope" in guardQuestions(call("Edit", { file_path: "/srv/app/src/a.ts" })), "without roots the question is always asked, as before");
+  assert.ok("intent_mismatch" in guardQuestions(call("Edit", { file_path: "/srv/app/src/a.ts" }), roots), "only scope is skipped");
+});
+
+test("writtenDirs collects the directories of successful file writes only", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-written-"));
+  const path = join(dir, "transcript.jsonl");
+  const call = (id, name, input) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+  const result = (id, ok) => ({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, is_error: !ok, content: [{ type: "text", text: ok ? "ok" : "denied" }] }] } });
+  writeFileSync(path, [
+    call("e1", "Edit", { file_path: "/a/b/c.ts", old_string: "x", new_string: "y" }), result("e1", true),
+    call("w1", "Write", { file_path: "/a/b/d.ts", content: "" }), result("w1", true),
+    call("w2", "Write", { file_path: "/x/y.ts", content: "" }), result("w2", false),
+    call("r1", "Read", { file_path: "/q/r.ts" }), result("r1", true),
+  ].map((l) => JSON.stringify(l)).join("\n"));
+  assert.deepEqual(writtenDirs(path), ["/a/b"]);
+});
+
 test("guardQuestions with no call still returns every question", () => {
   // The signature gained a parameter; callers that predate it must be
   // unaffected rather than quietly losing a hazard.

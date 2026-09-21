@@ -53,6 +53,13 @@ Read-only calls suppress most model hazards, but credential exposure and repeat
 failure remain relevant. Deterministic checks run before model judgments.
 Unknown or malformed model responses must not silently trim output.
 
+A `wrong_scope` ask on a file edit means the target lay outside every
+workspace root: the cwd, the host's workspace folders, directories the session
+had already written to, the temp directory, and `JEV_WORKSPACE_ROOTS`. Inside
+them the question is not asked at all and `signals.not_asked` says so. If a
+directory you work in keeps drawing asks, add it to `JEV_WORKSPACE_ROOTS`
+rather than raising `JEV_GUARD_ASK_AT`, which lowers every hazard at once.
+
 ## Tune from evidence
 
 First label expected behavior and inspect applicability, then wording, then

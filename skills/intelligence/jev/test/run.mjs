@@ -319,7 +319,7 @@ test("the brief keeps user constraints even when the model ranks nothing", () =>
   const candidates = harvest(fakeTranscript());
   const brief = composeBrief(candidates, new Set(), {}, "fix the flaky test");
   assert.match(brief, /do not touch the public API/);
-  assert.match(brief, /Unresolved failures/);
+  assert.match(brief, /Historical failures/);
 });
 
 // ── the hook itself ──────────────────────────────────────────────────

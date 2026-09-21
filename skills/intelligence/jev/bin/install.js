@@ -142,6 +142,7 @@ Run with --force to replace it:
   for (const name of [
     "SKILL.md",
     "README.md",
+    "package.json",
     "install.sh",
     "install-codex.sh",
     "install-antigravity.sh",
@@ -155,7 +156,7 @@ Run with --force to replace it:
 
   copyDir(path.join(repoRoot, "bin"), path.join(tempDir, "bin"), new Set([SELF]));
 
-  for (const name of ["lib", "test"]) {
+  for (const name of ["lib", "test", "references", "evals"]) {
     const source = path.join(repoRoot, name);
     if (fs.existsSync(source)) {
       copyDir(source, path.join(tempDir, name));

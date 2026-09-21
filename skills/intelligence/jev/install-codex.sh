@@ -36,8 +36,19 @@ def dejev:
   | map(select((.hooks // []) | length > 0));
 JQ
 
-mkdir -p "$(dirname "$HOOKS")"
-[ -f "$HOOKS" ] || echo '{}' > "$HOOKS"
+case "${1:-install}" in
+  install|--check|--remove) ;;
+  *) warn "unknown argument: $1"; exit 1 ;;
+esac
+
+if [ ! -f "$HOOKS" ]; then
+  if [ "${1:-install}" != "install" ]; then
+    say "No Jev configuration found at $HOOKS"
+    exit 0
+  fi
+  mkdir -p "$(dirname "$HOOKS")"
+  echo '{}' > "$HOOKS"
+fi
 
 if ! jq empty "$HOOKS" 2>/dev/null; then
   warn "$HOOKS is not valid JSON; fix it before installing"
@@ -132,7 +143,7 @@ if [ -f "$CONFIG" ] && grep -Eq '^[[:space:]]*hooks[[:space:]]*=[[:space:]]*fals
 fi
 
 if [ -z "${TYPESAFE_API_KEY:-}" ]; then
-  warn "TYPESAFE_API_KEY is not set — hooks stay inert until it is"
+  warn "TYPESAFE_API_KEY is not set — remote judgments are disabled; deterministic local behavior remains active"
   cat <<'NOTE'
 
     Put it somewhere Codex will inherit it, e.g. ~/.zshrc.local:

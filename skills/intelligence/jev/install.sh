@@ -58,8 +58,19 @@ def dejev:
   | map(select((.hooks // []) | length > 0));
 JQ
 
-mkdir -p "$(dirname "$SETTINGS")"
-[ -f "$SETTINGS" ] || echo '{}' > "$SETTINGS"
+case "${1:-install}" in
+  install|--check|--remove) ;;
+  *) warn "unknown argument: $1"; exit 1 ;;
+esac
+
+if [ ! -f "$SETTINGS" ]; then
+  if [ "${1:-install}" != "install" ]; then
+    say "No Jev configuration found at $SETTINGS"
+    exit 0
+  fi
+  mkdir -p "$(dirname "$SETTINGS")"
+  echo '{}' > "$SETTINGS"
+fi
 
 if ! jq empty "$SETTINGS" 2>/dev/null; then
   warn "$SETTINGS is not valid JSON; fix it before installing"
@@ -142,7 +153,7 @@ else
 fi
 
 if [ -z "${TYPESAFE_API_KEY:-}" ]; then
-  warn "TYPESAFE_API_KEY is not set — hooks stay inert until it is"
+  warn "TYPESAFE_API_KEY is not set — remote judgments are disabled; deterministic local behavior remains active"
   cat <<'NOTE'
 
     Put it in ~/.zshrc.local (somewhere Claude Code will inherit it):

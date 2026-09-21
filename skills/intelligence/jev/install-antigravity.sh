@@ -34,8 +34,19 @@ warn(){ printf "  \033[33m!\033[0m %s\n" "$*"; }
 command -v jq   >/dev/null || { warn "jq is required"; exit 1; }
 command -v node >/dev/null || { warn "node is required"; exit 1; }
 
-mkdir -p "$(dirname "$HOOKS")"
-[ -f "$HOOKS" ] || echo '{}' > "$HOOKS"
+case "${1:-install}" in
+  install|--check|--remove) ;;
+  *) warn "unknown argument: $1"; exit 1 ;;
+esac
+
+if [ ! -f "$HOOKS" ]; then
+  if [ "${1:-install}" != "install" ]; then
+    say "No Jev configuration found at $HOOKS"
+    exit 0
+  fi
+  mkdir -p "$(dirname "$HOOKS")"
+  echo '{}' > "$HOOKS"
+fi
 
 if ! jq empty "$HOOKS" 2>/dev/null; then
   warn "$HOOKS is not valid JSON; fix it before installing"
@@ -100,7 +111,7 @@ if [ ! -d "$HOME/.gemini" ]; then
 fi
 
 if [ -z "${TYPESAFE_API_KEY:-}" ]; then
-  warn "TYPESAFE_API_KEY is not set — the guard stays inert until it is"
+  warn "TYPESAFE_API_KEY is not set — remote judgments are disabled; deterministic guard checks remain active"
   cat <<'NOTE'
 
     Put it somewhere Antigravity will inherit it, e.g. ~/.zshrc.local:

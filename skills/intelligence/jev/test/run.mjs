@@ -24,7 +24,7 @@ delete process.env.TYPESAFE_API_KEY;
 
 const { denoise, toBlocks, stitch, selectBlocks, slim } = await import("../lib/slim.mjs");
 const { shouldWrap, rewrite, shellQuote } = await import("../lib/wrap.mjs");
-const { deterministicCheck, guard, decide, ALLOW, ASK, DENY } = await import("../lib/guard.mjs");
+const { deterministicCheck, guard, decide, guardQuestions, namesAPath, ALLOW, ASK, DENY } = await import("../lib/guard.mjs");
 const { harvest, composeBrief } = await import("../lib/carryforward.mjs");
 const fixtures = await import("./fixtures.mjs");
 
@@ -723,4 +723,53 @@ test("translate maps what it is sure of and hands the rest over untouched", () =
     input: { Selector: "#go" },
   });
   assert.deepEqual(translate({}), { toolName: "", input: {} });
+});
+
+// ── which questions get asked ────────────────────────────────────────
+//
+// `invented_target` asks whether a call invented "the path it names". A
+// call that names no path makes that unanswerable, and an unanswerable
+// question comes back near the middle rather than as a confident no —
+// `npm ci` scored 0.51 live on 2026-09-21, clearing the 0.45 ask
+// threshold over a path it never mentioned. There is no threshold that
+// separates that from a real detection at 0.56, so the fix is to not ask.
+
+test("namesAPath recognises a path and is not fooled by a version tag", () => {
+  assert.equal(namesAPath({ command: "npm test -- src/api/client.test.ts" }), true);
+  assert.equal(namesAPath({ command: "cat package.json" }), true);
+  assert.equal(namesAPath({ command: "rm -rf build/" }), true);
+  assert.equal(namesAPath({ file_path: "/srv/app/index.ts" }), true);
+
+  assert.equal(namesAPath({ command: "npm ci" }), false);
+  assert.equal(namesAPath({ command: "git status" }), false);
+  assert.equal(namesAPath({ command: "npm run build" }), false);
+  assert.equal(namesAPath({ command: "git checkout -- ." }), false, "a bare dot is not a named path");
+  assert.equal(
+    namesAPath({ command: "docker run -it ubuntu:20.04" }),
+    false,
+    "digits after a dot are a version, not an extension",
+  );
+
+  assert.equal(namesAPath({}), false);
+  assert.equal(namesAPath(null), false);
+});
+
+test("a call that names no path is never asked whether it invented one", () => {
+  const asked = guardQuestions({ toolName: "Bash", input: { command: "npm ci" } });
+  assert.ok(!("invented_target" in asked), "the question does not apply and must not be asked");
+  assert.ok("intent_mismatch" in asked, "every other hazard still is");
+  assert.ok("blast_radius" in asked);
+});
+
+test("a call that does name a path is asked about it as before", () => {
+  const asked = guardQuestions({ toolName: "Bash", input: { command: "cat src/a/b.ts" } });
+  assert.ok("invented_target" in asked);
+});
+
+test("guardQuestions with no call still returns every question", () => {
+  // The signature gained a parameter; callers that predate it must be
+  // unaffected rather than quietly losing a hazard.
+  const asked = guardQuestions();
+  assert.ok("invented_target" in asked);
+  assert.equal(Object.keys(asked).length, 7);
 });

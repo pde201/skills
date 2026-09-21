@@ -180,6 +180,50 @@ test("typed response validation rejects missing answers and invalid identifiers"
   await assert.rejects(systemOne({ state: "x", questions }), (error) => error instanceof JevUnavailable);
 });
 
+test("redaction keeps an object that is referenced twice and cuts only true cycles", async () => {
+  // Two questions sharing one criteria map is ordinary JSON. A redactor that
+  // tracked every visited object replaced the second reference with
+  // "[REDACTED]", and TypeSafe answered 422 on every slimming request.
+  const { redactState } = await import("../lib/privacy.mjs");
+  const shared = { B000: null, B001: null };
+  const out = redactState({ a: { criteria: shared }, b: { criteria: shared } });
+  assert.deepEqual(out.a.criteria, shared);
+  assert.deepEqual(out.b.criteria, shared);
+
+  const cyclic = { name: "x" };
+  cyclic.self = cyclic;
+  assert.equal(redactState(cyclic).self, "[REDACTED]");
+});
+
+test("the slimming request carries a criteria map for every block question", async () => {
+  let request;
+  installMock(validSlimResponse(100), (_url, options) => {
+    request = JSON.parse(options.body);
+  });
+  await slim(hundredLines, { task: "inspect test output", command: "npm test" });
+  for (const id of ["relevance", "second_relevance"]) {
+    assert.equal(typeof request.questions[id].criteria, "object", id);
+    assert.ok("B000" in request.questions[id].criteria, `${id} must name the blocks`);
+  }
+});
+
+test("free-text redaction covers environment-style names and prefixed tokens", async () => {
+  const { redactText } = await import("../lib/privacy.mjs");
+  for (const [input, expected] of [
+    ["AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG", "AWS_SECRET_ACCESS_KEY=[REDACTED]"],
+    ["GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789", "GITHUB_TOKEN=[REDACTED]"],
+    ["TOKEN=abc123", "TOKEN=[REDACTED]"],
+    ["export TYPESAFE_API_KEY=apikey_2252f7469cc801bd4b0ca8", "export TYPESAFE_API_KEY=[REDACTED]"],
+    ["key sk-proj-abcdefghijklmnop1234567890 here", "key [REDACTED] here"],
+    ["id AKIAIOSFODNN7EXAMPLE", "id [REDACTED]"],
+    ["xoxb-1234-5678-abcdefgh", "[REDACTED]"],
+    ["password: hunter2", "password: [REDACTED]"],
+  ]) {
+    assert.equal(redactText(input), expected, input);
+  }
+  assert.equal(redactText("npm run build --workspace=api"), "npm run build --workspace=api", "ordinary text is untouched");
+});
+
 test("decision logs are redacted and private", () => {
   logDecision({ token: "log-secret", ssn: "123-45-6789", message: "password=log-password" });
   const path = join(stateDir(), "jev-log.jsonl");

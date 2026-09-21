@@ -316,7 +316,8 @@ async function sessionEnd(event) {
   dropPrompt(event.session_id);
   if (config.dodGate && event.transcript_path) {
     try {
-      const dod = await checkDefinitionOfDone({ transcriptPath: event.transcript_path });
+      // Codex gives this event three seconds. One attempt, well inside it.
+      const dod = await checkDefinitionOfDone({ transcriptPath: event.transcript_path, timeoutMs: 1500, retries: 0 });
       if (!dod.allow) {
         logDecision({ agent: "codex", hook: "SessionEnd", unverified: true, reason: dod.reason });
       }
@@ -325,15 +326,20 @@ async function sessionEnd(event) {
   return nothing();
 }
 
-// ── PostToolUse ──────────────────────────────────────────────────────
+// ── PostToolUse / PostToolUseFailure ─────────────────────────────────
+//
+// Codex's failure event shape is not pinned down by documentation this repo
+// can cite, so both names are accepted and both error spellings are read.
 
 async function postToolUse(event) {
-  if (event.error || event.tool_result?.is_error) {
+  const error = event.error || (event.tool_result?.is_error ? event.tool_result?.content : null);
+  if (error && !event.is_interrupt) {
     try {
       await triageToolError({
         toolName: event.tool_name,
         input: event.tool_input,
-        error: event.error || event.tool_result?.content,
+        error,
+        agent: "codex",
       });
     } catch {}
   }
@@ -356,6 +362,7 @@ async function main() {
     case "PreToolUse":
       return await preToolUse(event);
     case "PostToolUse":
+    case "PostToolUseFailure":
       return await postToolUse(event);
     case "UserPromptSubmit":
       return userPromptSubmit(event);

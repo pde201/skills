@@ -34,9 +34,14 @@ const strictest = (decisions) => PRECEDENCE.find((d) => decisions.includes(d)) ?
 // Patterns that are catastrophic regardless of intent. Short, and every
 // entry earns its place — this is not a general-purpose linter.
 const CATASTROPHIC = [
-  { re: /\brm\s+(-[a-zA-Z]*\s+)*-?[a-zA-Z]*[rf][a-zA-Z]*\s+\/(\s|$)/, why: "recursive delete of /" },
+  // Any option may sit between `rm` and a bare `/` or `/*` — including the
+  // long `--no-preserve-root`, which is the one that makes the delete work.
+  { re: /\brm\b(?:\s+-{1,2}[\w-]+)*\s+\/(?:\*)?(\s|$)/, why: "recursive delete of /" },
+  { re: /\brm\b[^|;&]*--no-preserve-root/, why: "recursive delete with --no-preserve-root" },
   { re: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+(~|\$HOME)(\/\s*)?(\s|$)/, why: "recursive delete of the home directory" },
-  { re: /\bgit\s+push\b[^|;&]*--force(?!-with-lease)/, why: "force push without --force-with-lease" },
+  // `--force` and `-f` alike; `--force-with-lease` and `--force-if-includes`
+  // are the safe spellings and are deliberately not matched.
+  { re: /\bgit\s+push\b[^|;&]*\s(--force|-f)(\s|$)/, why: "force push without --force-with-lease" },
   { re: /\bgit\s+(reset\s+--hard|clean\s+-[a-zA-Z]*f)/, why: "discards uncommitted work irreversibly" },
   { re: /\b(mkfs|dd\s+if=[^\s]+\s+of=\/dev\/)/, why: "writes directly to a device" },
   { re: /\bchmod\s+-R\s+777\s+\//, why: "recursive permission change from the filesystem root" },

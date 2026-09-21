@@ -97,7 +97,8 @@ async function preToolUse(event) {
     });
   }
 
-  // Thrashing and goal drift check
+  // Thrashing and goal drift check. The warning is for the model, so it goes
+  // out as additionalContext — `systemMessage` is shown to the user only.
   let thrashingWarning = null;
   if (config.supervision && transcriptPath) {
     try {
@@ -108,41 +109,48 @@ async function preToolUse(event) {
       }
     } catch {}
   }
+  const withWarning = (hookSpecificOutput = {}) =>
+    thrashingWarning ? { ...hookSpecificOutput, additionalContext: thrashingWarning } : hookSpecificOutput;
+  const warningOnly = () =>
+    thrashingWarning
+      ? emit({ hookSpecificOutput: { hookEventName: "PreToolUse", ...withWarning() } })
+      : nothing();
 
   // Allowed. Now: is this a command whose output is going to be bloat?
-  if (toolName !== "Bash") {
-    return thrashingWarning ? emit({ systemMessage: thrashingWarning }) : nothing();
-  }
+  if (toolName !== "Bash") return warningOnly();
 
   const command = input?.command;
   const { wrap, why } = shouldWrap(command);
   if (!wrap) {
     logDecision({ hook: "PreToolUse", tool: "Bash", wrapped: false, reason: why });
-    return thrashingWarning ? emit({ systemMessage: thrashingWarning }) : nothing();
+    return warningOnly();
   }
 
   const updated = rewrite(command, task);
   logDecision({ hook: "PreToolUse", tool: "Bash", wrapped: true, matched: why, command: command.slice(0, 200) });
 
-  const msg = [thrashingWarning, `jev: routing ${why} output through the slimmer`].filter(Boolean).join("\n");
   return emit({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
-      updatedInput: { ...input, command: updated },
+      ...withWarning({ updatedInput: { ...input, command: updated } }),
     },
-    systemMessage: msg,
+    systemMessage: `jev: routing ${why} output through the slimmer`,
   });
 }
 
-// ── PostToolUse ──────────────────────────────────────────────────────
+// ── PostToolUseFailure ───────────────────────────────────────────────
+//
+// PostToolUse fires only after a tool succeeds and carries no error; the
+// failures this triage exists for arrive as PostToolUseFailure with `error`.
 
-async function postToolUse(event) {
-  if (event.error || event.tool_result?.is_error) {
+async function postToolUseFailure(event) {
+  if (typeof event.error === "string" && event.error && !event.is_interrupt) {
     try {
       await triageToolError({
         toolName: event.tool_name,
         input: event.tool_input,
-        error: event.error || event.tool_result?.content,
+        error: event.error,
+        agent: "claude",
       });
     } catch {}
   }
@@ -193,8 +201,8 @@ async function main() {
   switch (event.hook_event_name) {
     case "PreToolUse":
       return await preToolUse(event);
-    case "PostToolUse":
-      return await postToolUse(event);
+    case "PostToolUseFailure":
+      return await postToolUseFailure(event);
     case "PreCompact":
       return await preCompact(event);
     case "SessionStart":

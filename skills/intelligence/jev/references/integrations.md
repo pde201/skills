@@ -14,16 +14,24 @@ path before updating, and preserve unrelated configuration.
 `--check` reports registration only and does not create a missing config file.
 For installation use `./install.sh <agent>`; for removal use
 `./install.sh <agent> --remove`. Use `all` only when all agents were requested.
-Install/remove changes config; install also creates `~/.local/bin/jev-slim`.
+Install/remove changes config; install also creates `~/.local/bin/jev-slim`,
+which a single-agent removal leaves in place and `all --remove` deletes.
 Backups are beside the configuration. Inspect a backup before restoring it so
 later unrelated settings are not overwritten. Removal does not purge logs,
 briefs, saved output, or copied skill files.
 
+The installers refuse Node below 18, warn below 22 (tests and evals), and warn
+when the skill directory looks temporary, because hooks are registered by
+absolute path and stop working when that directory is deleted.
+
 | Adapter | Config default / override | Implemented events |
 | --- | --- | --- |
-| Claude Code | `~/.claude/settings.json` / `CLAUDE_SETTINGS` | PreToolUse, PostToolUse, PreCompact, SessionStart/compact |
-| Codex | `${CODEX_HOME:-~/.codex}/hooks.json` / `CODEX_HOOKS` | PreToolUse, PostToolUse, UserPromptSubmit, PreCompact, SessionStart, SessionEnd |
-| Antigravity | `~/.gemini/config/hooks.json` / `JEV_ANTIGRAVITY_HOOKS` | PreToolUse, PreInvocation, PostToolUse, Stop |
+| Claude Code | `~/.claude/settings.json` / `CLAUDE_SETTINGS` | PreToolUse, PostToolUseFailure, PreCompact, SessionStart/compact |
+| Codex | `${CODEX_HOME:-~/.codex}/hooks.json` / `CODEX_HOOKS` | PreToolUse, PostToolUse (PostToolUseFailure also accepted), UserPromptSubmit, PreCompact, SessionStart, SessionEnd |
+| Antigravity | `~/.gemini/config/hooks.json` / `JEV_ANTIGRAVITY_HOOKS`; tool matcher `JEV_ANTIGRAVITY_MATCHER` | PreToolUse, PreInvocation, PostToolUse, Stop |
+
+Skill-copy destinations: `CLAUDE_HOME`, `CODEX_HOME`, `ANTIGRAVITY_HOME` (see
+`install-skill.sh --help`).
 
 The table describes adapter assumptions, not verified support in every host
 release. Before claiming compatibility record host name, exact version, platform,
@@ -39,20 +47,20 @@ names registered by its installer.
 ### Supported Host Capabilities
 
 - **Claude Code**:
-  - **PreToolUse**: deterministic safety checks, git safety (force push and sensitive commit detection escalates to `ask`), command output slimming via `updatedInput.command`, and thrashing/goal drift warnings injected via `systemMessage`.
-  - **PostToolUse**: error triage classifying tool execution failures into structured categories and logging diagnostics.
-  - **PreCompact & SessionStart**: context harvesting and single-use carry-forward brief injection across compaction.
+  - **PreToolUse**: deterministic safety checks, git safety (force push and sensitive commit detection escalates to `ask`), command output slimming via `updatedInput.command`, and thrashing/goal drift warnings delivered to the model as `hookSpecificOutput.additionalContext`. (`systemMessage` is shown to the user only and carries the slimming notice.)
+  - **PostToolUseFailure**: error triage classifying tool execution failures into structured categories and logging diagnostics. `PostToolUse` fires only after a successful call and carries `tool_response`, never an error, so it is not registered.
+  - **PreCompact & SessionStart**: context harvesting and single-use carry-forward brief injection across compaction, bounded to the host's 10,000-character `additionalContext` cap with the full brief kept on disk.
 - **Codex**:
   - **PreToolUse**: deterministic safety checks, git safety (`ask`), and command slimming via `updatedInput.command` (handling string and argv shapes).
-  - **PostToolUse**: error triage classifying tool execution failures into structured categories.
+  - **PostToolUse**: error triage classifying tool execution failures into structured categories. The adapter reads `error` or `tool_result.is_error` and also accepts the event under the name `PostToolUseFailure`; which shape a given Codex build sends is not verified here.
   - **UserPromptSubmit**: prompt stashing for task-directed slimming without guessing transcript formats.
   - **PreCompact & SessionStart**: carry-forward brief injection across compaction.
-  - **SessionEnd**: prompt cleanup and Definition of Done verification audit logging.
+  - **SessionEnd**: prompt cleanup and Definition of Done verification audit logging, with a single 1.5 s model attempt to stay inside Codex's 3 s cap. It logs; it cannot block.
 - **Antigravity**:
-  - **PreToolUse**: deterministic checks, git pre-commit/force-push safety, and command output slimming via `overwrite: { CommandLine: ... }`.
+  - **PreToolUse**: deterministic checks, git pre-commit/force-push safety, and command output slimming via `overwrite: { CommandLine: ... }`, which Antigravity requires to be paired with `decision: "allow"`; an untripped call gets no output unless `JEV_ANTIGRAVITY_EXPLICIT_ALLOW=1`.
   - **PreInvocation**: injects single-use carry-forward briefs across compaction and alerts on repeated tool thrashing or goal drift via `injectSteps`.
-  - **PostToolUse**: classifies tool execution errors into structured categories and logs diagnostics.
-  - **Stop**: Definition of Done gate preventing completion via `decision: "continue"` if files were edited without subsequent test verification.
+  - **PostToolUse**: classifies tool execution errors into structured categories and logs diagnostics. Registered for the same tool matcher as PreToolUse rather than `*`.
+  - **Stop**: Definition of Done gate preventing completion via `decision: "continue"` if files were edited without subsequent test verification. There is no loop guard yet: a session that cannot run tests should set `JEV_DOD_GATE=0`.
   - **Skill packaging**: `./install-skill.sh antigravity` installs directly to `~/.gemini/config/skills/jev`.
 
 Restart the target host after registration or environment changes. Verify in

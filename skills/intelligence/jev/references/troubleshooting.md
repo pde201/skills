@@ -11,6 +11,17 @@ Read `lib/config.mjs` for current defaults. Distinguish absent registration,
 untrusted hooks, unmatched tool names, disabled features, deterministic-only
 operation, and remote API failure. Missing credentials do not make hooks inert.
 
+A log full of `by: "code"` with `reason: "no api key"` while the key is set in
+your shell means the agent process did not inherit it. GUI-launched agents read
+the login session's environment, not shell rc files: publish the key there (on
+macOS `launchctl setenv`), then quit and relaunch the app. A process keeps the
+environment it started with, so rotating the key also needs a relaunch.
+
+A `jev-slim` record with `reason: "jev unavailable: TypeSafe 422 …"` is a
+request the API rejected as malformed. That is a bug in this layer, not a
+tuning problem; the outbound body is redacted before it is sent, so check that
+redaction has not altered the request's structure.
+
 ## Recover output
 
 Use the exact Jev footer path and inspect the needed range. If the file is gone,

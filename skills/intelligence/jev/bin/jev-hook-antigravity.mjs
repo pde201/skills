@@ -89,7 +89,9 @@ export function translate(toolCall) {
         file_path: args.TargetFile,
         old_string: args.TargetContent,
         new_string: args.ReplacementContent,
-        allow_multiple: args.AllowMultiple,
+        // The deterministic ambiguity check reads `replace_all`; Antigravity
+        // spells the same intent `AllowMultiple`.
+        replace_all: args.AllowMultiple,
       },
     };
   }
@@ -265,6 +267,7 @@ async function postToolUse(event) {
         toolName: recent?.tool || "tool",
         input: recent?.input || "",
         error: event.error,
+        agent: "antigravity",
       });
     } catch {}
   }

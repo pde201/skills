@@ -101,7 +101,10 @@ export function renderBlocks(blocks) {
 // ── The judgments ────────────────────────────────────────────────────
 
 export function slimQuestions(blocks, task, command) {
-  const blockIds = Object.fromEntries(blocks.map((b) => [b.id, null]));
+  // Built fresh for each question that needs it. Sharing one object between
+  // two questions is valid JSON but looks like a cycle to a naive redactor,
+  // and a criteria map that arrives as "[REDACTED]" is a 422 on every call.
+  const blockIds = () => Object.fromEntries(blocks.map((b) => [b.id, null]));
   return {
     shape: choice(
       "What kind of output is `output`? Judge by its own content, not by the command that produced it.",
@@ -127,13 +130,13 @@ export function slimQuestions(blocks, task, command) {
     ),
     relevance: choice(
       `Which block of \`output\` is most important to keep for someone working on \`task\`? The command that produced it was \`command\`.`,
-      blockIds,
+      blockIds(),
     ),
     ...(blocks.length > 1
       ? {
           second_relevance: choice(
             `Setting aside the single most important block, which block of \`output\` carries the next most important information for \`task\`?`,
-            blockIds,
+            blockIds(),
           ),
         }
       : {}),

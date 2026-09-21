@@ -42,13 +42,36 @@ const textOf = (content) => {
     .join("\n");
 };
 
+// Text a host injects into user turns that the human never typed: Claude
+// Code's system reminders and hook notifications, the desktop app's terminal
+// relays, slash-command wrappers. It is not a request, and it is exactly the
+// kind of bulk that a task string or a carry-forward brief must not carry.
+const INJECTED_TAGS = [
+  "system-reminder", "task-notification", "ci-monitor-event",
+  "bash-input", "bash-stdout", "bash-stderr",
+  "local-command-stdout", "local-command-stderr", "local-command-caveat",
+  "command-name", "command-message", "command-args",
+  "user-prompt-submit-hook", "ide_opened_file", "ide_selection",
+];
+const INJECTED_BLOCK = new RegExp(`<(${INJECTED_TAGS.join("|")})>[\\s\\S]*?</\\1>`, "g");
+const INJECTED_OPENING = new RegExp(`^\\s*<(${INJECTED_TAGS.join("|")})>`);
+
+/** Remove host-injected blocks from a user turn, leaving what the human wrote. */
+export function stripInjectedBlocks(text) {
+  if (typeof text !== "string") return "";
+  const stripped = text.replace(INJECTED_BLOCK, "");
+  // An unterminated block (truncated turn) still starts with its tag.
+  return INJECTED_OPENING.test(stripped) ? "" : stripped.trim();
+}
+
 const extractUserText = (raw) => {
   if (!raw || typeof raw !== "string") return "";
   const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
   if (match) return match[1].trim();
+  const text = stripInjectedBlocks(raw);
   // Claude/Codex tool results arrive shaped as user turns; skip them
-  if (raw.startsWith("<") && !raw.startsWith("<USER_REQUEST>")) return "";
-  return raw.trim();
+  if (text.startsWith("<") && !text.startsWith("<USER_REQUEST>")) return "";
+  return text;
 };
 
 const isUserTurn = (entry) =>

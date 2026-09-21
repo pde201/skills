@@ -9,7 +9,7 @@ process.env.JEV_STATE_DIR = join(root, 'state');
 process.env.JEV_HOOKS_CARRY_FORWARD = '1';
 process.env.JEV_RETRIES = '0';
 delete process.env.TYPESAFE_API_KEY;
-const { harvest, composeBrief, buildBrief, consumeBrief } = await import('../lib/carryforward.mjs');
+const { harvest, composeBrief, buildBrief, consumeBrief, MAX_INJECT_CHARS } = await import('../lib/carryforward.mjs');
 after(() => rmSync(root, { recursive: true, force: true }));
 let count = 0;
 function transcript(entries) {
@@ -76,6 +76,67 @@ test('briefs use private files and safe session names, and are consumed once per
   assert.ok(consumeBrief('../../outside').includes('Preserve this requirement'));
   assert.equal(consumeBrief('../../outside'), null);
   assert.ok(consumeBrief('other'));
+});
+
+test('host-injected blocks in user turns are not harvested as requests', () => {
+  const path = transcript([
+    user([
+      { type: 'text', text: '<system-reminder>\nContents of CLAUDE.md and the memory index, thousands of characters.\n</system-reminder>' },
+      { type: 'text', text: 'Keep the public API unchanged.' },
+    ]),
+    user('<task-notification>background job finished</task-notification>'),
+    user('Stop after the tests pass. <system-reminder>irrelevant</system-reminder>'),
+  ]);
+  const requests = harvest(path).filter(c => c.kind === 'request').map(c => c.text);
+  assert.deepEqual(requests, ['Keep the public API unchanged.', 'Stop after the tests pass.']);
+});
+
+test('a brief over the host cap is injected bounded, newest first, with the full text kept on disk', async () => {
+  const entries = Array.from({ length: 30 }, (_, i) => user(`Requirement ${i}: ` + 'context '.repeat(150) + ` tail-${i}`));
+  const result = await buildBrief({ transcriptPath: transcript(entries), sessionId: 'bounded-inject' });
+  assert.equal(result.bounded, true);
+
+  const injected = consumeBrief('bounded-inject');
+  assert.ok(injected.length <= MAX_INJECT_CHARS, `injected ${injected.length} chars, cap ${MAX_INJECT_CHARS}`);
+  assert.match(injected, /tail-29/, 'the newest request survives');
+  assert.doesNotMatch(injected, /tail-0\b/, 'the oldest is what gives way');
+  assert.match(injected, /Complete brief: \S+\.full\.md\]/);
+
+  const fullPath = injected.match(/Complete brief: (\S+)\]/)[1];
+  const full = readFileSync(fullPath, 'utf8');
+  for (let i = 0; i < 30; i++) assert.ok(full.includes(`tail-${i}`), `tail-${i} must be recoverable`);
+  assert.equal(statSync(fullPath).mode & 0o777, 0o600);
+  assert.equal(consumeBrief('bounded-inject'), null, 'still injected exactly once');
+});
+
+test('a brief under the cap is injected whole and leaves nothing behind', async () => {
+  const result = await buildBrief({ transcriptPath: transcript([user('Never change the schema.')]), sessionId: 'small' });
+  assert.equal(result.bounded, false);
+  const injected = consumeBrief('small');
+  assert.match(injected, /Never change the schema/);
+  assert.doesNotMatch(injected, /Complete brief:/);
+  assert.equal(consumeBrief('small'), null);
+});
+
+test('the ranking request carries a criteria map for both choice questions', async () => {
+  const path = transcript([user('One.'), user('Two.')]);
+  const originalFetch = globalThis.fetch;
+  let payload;
+  process.env.TYPESAFE_API_KEY = 'synthetic-test-key';
+  globalThis.fetch = async (_url, options) => {
+    payload = JSON.parse(options.body);
+    return { ok: true, json: async () => ({}) };
+  };
+  try {
+    await buildBrief({ transcriptPath: path, sessionId: 'criteria' });
+    for (const id of ['most_needed', 'next_needed']) {
+      assert.equal(typeof payload.questions[id].criteria, 'object', id);
+      assert.ok('C00' in payload.questions[id].criteria, `${id} must name the candidates`);
+    }
+  } finally {
+    delete process.env.TYPESAFE_API_KEY;
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test('remote ranking is bounded while all full requirements remain locally recoverable', async () => {

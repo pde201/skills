@@ -9,7 +9,7 @@
 // ──────────────────────────────────────────────────────────────────────
 
 import { execSync } from "node:child_process";
-import { recentToolCalls, latestUserRequest, readEntries } from "./transcript.mjs";
+import { recentToolCalls, latestUserRequest } from "./transcript.mjs";
 import { systemOne, noul, choice, score, haveKey } from "./client.mjs";
 import { logDecision } from "./log.mjs";
 import config from "./config.mjs";
@@ -22,6 +22,22 @@ const SENSITIVE_PATTERNS = [
   /credentials\.json/i,
   /secrets?\./i,
 ];
+// Templates are meant to be committed; only a real .env carries values.
+const SENSITIVE_EXEMPT = /\.env\.(example|sample|template|dist)$/i;
+
+// `--force` and `-f`, but not `--force-with-lease` or `--force-if-includes`,
+// which is the same line lib/guard.mjs draws.
+const FORCE_PUSH = /\bgit\s+push\b[^|;&]*\s(--force|-f)(\s|$)/;
+// `git commit -a` / `--all` / `-am` stages every modified tracked file at
+// commit time, so the worktree column of `git status` counts as staged too.
+const STAGES_ALL = /\s(--all|-[a-zA-Z]*a[a-zA-Z]*)(\s|$)/;
+
+// Which tools change files, by the names each host reports them under.
+const EDIT_TOOLS = new Set([
+  "replace_file_content", "edit_file", "write_to_file", "create_file", // Antigravity
+  "apply_patch",                                                        // Codex
+  "edit", "write", "multiedit", "notebookedit",                         // Claude Code, Codex aliases
+]);
 
 const TEST_COMMAND_PATTERNS = [
   /\b(npm|pnpm|yarn|bun)\s+(test|run\s+test)/,
@@ -120,12 +136,13 @@ export async function checkGoalDriftAndThrashing({ transcriptPath, latestRequest
  * @param {object} opts
  * @param {string} opts.transcriptPath
  * @param {string} [opts.latestRequest]
+ * @param {number} [opts.timeoutMs]  per-attempt budget for the model call
+ * @param {number} [opts.retries]    hosts that cap this event short pass 0
  * @returns {Promise<{allow: boolean, reason?: string}>}
  */
-export async function checkDefinitionOfDone({ transcriptPath, latestRequest } = {}) {
+export async function checkDefinitionOfDone({ transcriptPath, latestRequest, timeoutMs = 2500, retries } = {}) {
   if (!config.dodGate) return { allow: true };
 
-  const entries = readEntries(transcriptPath);
   const calls = recentToolCalls(transcriptPath, { limit: 50 });
   const task = latestRequest || latestUserRequest(transcriptPath);
 
@@ -135,13 +152,7 @@ export async function checkDefinitionOfDone({ transcriptPath, latestRequest } = 
 
   for (let i = 0; i < calls.length; i++) {
     const c = calls[i];
-    const name = c.tool.toLowerCase();
-    if (
-      name === "replace_file_content" ||
-      name === "edit_file" ||
-      name === "write_to_file" ||
-      name === "create_file"
-    ) {
+    if (EDIT_TOOLS.has(String(c.tool ?? "").toLowerCase())) {
       lastEditIndex = i;
       modifiedTargets.push(c.input);
     }
@@ -183,7 +194,8 @@ export async function checkDefinitionOfDone({ transcriptPath, latestRequest } = 
     try {
       const res = await systemOne({
         model: config.model,
-        timeoutMs: 2500,
+        timeoutMs,
+        ...(retries !== undefined ? { retries } : {}),
         state: {
           task: task.slice(0, 1000),
           recent_activity: calls.slice(-6).map((c) => `${c.tool}(${c.input.slice(0, 100)}) => ${c.failed ? "FAILED" : "OK"}`).join("\n"),
@@ -224,9 +236,12 @@ export async function checkDefinitionOfDone({ transcriptPath, latestRequest } = 
  * @param {string} opts.toolName
  * @param {string|object} opts.input
  * @param {string} opts.error
- * @returns {Promise<{category: string, confidence?: number}>}
+ * @param {string} [opts.agent]  which adapter is asking, for the log
+ * @returns {Promise<{category: string, confidence?: number, skipped?: boolean}>}
  */
-export async function triageToolError({ toolName, input, error } = {}) {
+export async function triageToolError({ toolName, input, error, agent = "unknown" } = {}) {
+  if (!config.supervision) return { category: "unknown", skipped: true };
+
   const errStr = typeof error === "string" ? error : JSON.stringify(error || "");
   const inputStr = typeof input === "string" ? input : JSON.stringify(input || "");
 
@@ -254,7 +269,7 @@ export async function triageToolError({ toolName, input, error } = {}) {
 
       const cat = res.answers?.category?.choice || "unknown";
       const conf = res.answers?.category?.confidence || 0;
-      logDecision({ agent: "antigravity", hook: "PostToolUse", triage: cat, confidence: conf, tool: toolName });
+      logDecision({ agent, hook: "PostToolUse", triage: cat, confidence: conf, tool: toolName });
       return { category: cat, confidence: conf };
     } catch {
       // Fall through
@@ -275,7 +290,7 @@ export async function triageToolError({ toolName, input, error } = {}) {
     cat = "timeout_or_network";
   }
 
-  logDecision({ agent: "antigravity", hook: "PostToolUse", triage: cat, deterministic: true, tool: toolName });
+  logDecision({ agent, hook: "PostToolUse", triage: cat, deterministic: true, tool: toolName });
   return { category: cat };
 }
 
@@ -297,7 +312,7 @@ export function checkGitSafety({ command, cwd } = {}) {
   if (!isGitCommit && !isGitPush) return null;
 
   // Catastrophic push checks
-  if (isGitPush && /--force|-f\b/.test(command) && /\b(main|master|prod|production)\b/.test(command)) {
+  if (isGitPush && FORCE_PUSH.test(command) && /\b(main|master|prod|production)\b/.test(command)) {
     return {
       decision: "ask",
       reason: "Jev Git Safety: force push to main/master branches requires explicit confirmation.",
@@ -308,13 +323,14 @@ export function checkGitSafety({ command, cwd } = {}) {
   if (isGitCommit && cwd) {
     try {
       const statusOutput = execSync("git status --porcelain", { cwd, encoding: "utf8", timeout: 1500 });
+      const stagesAll = STAGES_ALL.test(command);
       const stagedFiles = statusOutput
         .split("\n")
-        .filter((line) => /^[MADRC]/.test(line))
+        .filter((line) => /^[MADRC]/.test(line) || (stagesAll && /^.[MD]/.test(line)))
         .map((line) => line.slice(3).trim());
 
       const sensitiveFiles = stagedFiles.filter((f) =>
-        SENSITIVE_PATTERNS.some((p) => p.test(f))
+        SENSITIVE_PATTERNS.some((p) => p.test(f)) && !SENSITIVE_EXEMPT.test(f)
       );
 
       if (sensitiveFiles.length > 0) {

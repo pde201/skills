@@ -8,7 +8,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -247,12 +247,14 @@ test("shellQuote survives a round trip through the shell", () => {
   }
 });
 
-test("a rewritten command still runs the original", () => {
-  const rewritten = rewrite(`printf '%s\\n' "it's fine"`, "");
+test("a rewritten command still runs the original, multi-byte output included", () => {
+  // Box-drawing and check marks are what build tools print; a wrapper that
+  // joined stdout chunks as strings turned them into replacement characters.
+  const rewritten = rewrite(`printf '%s\\n' "─ it's fine ✓ — naïve"`, "");
   const out = execFileSync("/bin/bash", ["-c", rewritten], {
     env: { ...process.env, JEV_HOOKS: "1" },
   }).toString();
-  assert.equal(out.trim(), "it's fine");
+  assert.equal(out.trim(), "─ it's fine ✓ — naïve");
 });
 
 test("a wrapped command that fails keeps its exit code and its whole output", () => {
@@ -392,14 +394,92 @@ test("claude: PreToolUse asks on force push to main", () => {
   assert.match(result.hookSpecificOutput.permissionDecisionReason, /force push/i);
 });
 
-test("claude: PostToolUse triages error without failing", () => {
+const logPath = () => join(process.env.JEV_STATE_DIR, "jev-log.jsonl");
+const logRecordsSince = (count) =>
+  readFileSync(logPath(), "utf8").trim().split("\n").slice(count).filter(Boolean).map((line) => JSON.parse(line));
+const logCount = () => (existsSync(logPath()) ? readFileSync(logPath(), "utf8").trim().split("\n").filter(Boolean).length : 0);
+
+test("claude: PostToolUseFailure triages the error and attributes it to claude", () => {
+  // Claude Code's PostToolUse fires only on success and carries no error;
+  // the failure event is PostToolUseFailure with `error`, as its docs say.
+  const before = logCount();
+  const result = runHook({
+    hook_event_name: "PostToolUseFailure",
+    tool_name: "Bash",
+    tool_input: { command: "npm test" },
+    error: "Exit code 127\nsh: vitest: command not found",
+    is_interrupt: false,
+  });
+  assert.equal(result, null);
+  const triage = logRecordsSince(before).find((r) => r.triage);
+  assert.ok(triage, "a triage record must be written");
+  assert.equal(triage.agent, "claude");
+  assert.equal(triage.triage, "missing_dependency");
+});
+
+test("claude: PostToolUse carries a tool_response, not an error, and triages nothing", () => {
+  const before = logCount();
   const result = runHook({
     hook_event_name: "PostToolUse",
     tool_name: "Bash",
     tool_input: { command: "npm test" },
-    error: "exit status 1",
+    tool_response: { stdout: "ok", stderr: "", interrupted: false },
   });
   assert.equal(result, null);
+  assert.equal(logRecordsSince(before).filter((r) => r.triage).length, 0);
+});
+
+test("claude: JEV_HOOKS_SUPERVISION=0 switches error triage off", () => {
+  const before = logCount();
+  runHook(
+    { hook_event_name: "PostToolUseFailure", tool_name: "Bash", tool_input: { command: "npm test" }, error: "Exit code 1" },
+    { JEV_HOOKS_SUPERVISION: "0" },
+  );
+  assert.equal(logRecordsSince(before).filter((r) => r.triage).length, 0);
+});
+
+function thrashingTranscript() {
+  const dir = mkdtempSync(join(tmpdir(), "jev-thrash-claude-"));
+  const path = join(dir, "transcript.jsonl");
+  const lines = [{ type: "user", message: { role: "user", content: "Make the build pass." } }];
+  for (let i = 0; i < 3; i++) {
+    lines.push({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "tool_use", id: `t${i}`, name: "Bash", input: { command: "npm run build" } }] },
+    });
+    lines.push({
+      type: "user",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: `t${i}`, is_error: true, content: [{ type: "text", text: "error TS2304" }] }] },
+    });
+  }
+  writeFileSync(path, lines.map((l) => JSON.stringify(l)).join("\n"));
+  return path;
+}
+
+test("claude: a thrashing warning reaches the model as additionalContext, not as a user notice", () => {
+  const result = runHook({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo hi" },
+    cwd: process.cwd(),
+    transcript_path: thrashingTranscript(),
+  });
+  assert.match(result.hookSpecificOutput.additionalContext, /Jev Supervision/);
+  assert.equal(result.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.equal(result.systemMessage, undefined, "systemMessage is shown to the user, not the model");
+  assert.equal(result.hookSpecificOutput.permissionDecision, undefined);
+});
+
+test("claude: a thrashing warning rides along with a slimming rewrite", () => {
+  const result = runHook({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "npm run build" },
+    cwd: process.cwd(),
+    transcript_path: thrashingTranscript(),
+  });
+  assert.match(result.hookSpecificOutput.updatedInput.command, /jev-slim\.mjs/);
+  assert.match(result.hookSpecificOutput.additionalContext, /Jev Supervision/);
 });
 
 test("an unknown event is ignored", () => {
@@ -635,14 +715,24 @@ test("codex: PreToolUse asks on force push to main", () => {
   assert.match(result.hookSpecificOutput.permissionDecisionReason, /force push/i);
 });
 
-test("codex: PostToolUse triages error without failing", () => {
+test("codex: PostToolUse triages error without failing, and the record says codex", () => {
+  const before = logCount();
   const result = runCodex({
     hook_event_name: "PostToolUse",
     tool_name: "Bash",
     tool_input: { command: "npm test" },
-    error: "exit status 1",
+    error: "Exit code 1\nAssertionError: expected 1 to be 2",
   });
   assert.equal(result, null);
+  const triage = logRecordsSince(before).find((r) => r.triage);
+  assert.equal(triage?.agent, "codex", "triage used to be logged as antigravity whoever asked");
+  assert.equal(triage?.triage, "test_assertion");
+});
+
+test("codex: PostToolUseFailure is accepted under that name too", () => {
+  const before = logCount();
+  assert.equal(runCodex({ hook_event_name: "PostToolUseFailure", tool_name: "Bash", tool_input: { command: "x" }, error: "Exit code 1\nEACCES" }), null);
+  assert.equal(logRecordsSince(before).find((r) => r.triage)?.triage, "permission_or_path");
 });
 
 test("codex: SessionEnd evaluates DoD and cleans up without failing", () => {
@@ -909,7 +999,7 @@ test("translate maps what it is sure of and hands the rest over untouched", () =
     args: { TargetFile: "/a/b.ts", TargetContent: "old", ReplacementContent: "new" },
   }), {
     toolName: "Edit",
-    input: { file_path: "/a/b.ts", old_string: "old", new_string: "new", allow_multiple: undefined },
+    input: { file_path: "/a/b.ts", old_string: "old", new_string: "new", replace_all: undefined },
   });
   assert.deepEqual(translate({
     name: "write_to_file",
@@ -1020,4 +1110,112 @@ test("the gate applies only to reads — a change is judged as before", () => {
   assert.equal(decide({ intent_mismatch: 0.57 }, reach(1.06)).decision, ASK);
   assert.equal(decide({ invented_target: 0.77 }, reach(1.5)).decision, ASK);
   assert.equal(decide({ destructive_unrequested: 0.9 }, reach(2)).decision, DENY);
+});
+
+// ── regressions from the 2026-09-21 review ───────────────────────────
+
+test("catastrophic patterns cover --no-preserve-root and -f, and spare the safe force spellings", () => {
+  for (const command of [
+    "rm -rf --no-preserve-root /",
+    "sudo rm -rf / --no-preserve-root",
+    "rm -rf /*",
+    "git push -f origin feature/x",
+  ]) {
+    assert.equal(deterministicCheck("Bash", { command }, "/tmp")?.decision, ASK, command);
+  }
+  for (const command of [
+    "git push --force-with-lease origin main",
+    "git push --force-if-includes origin main",
+    "rm -rf /tmp/build",
+  ]) {
+    assert.equal(deterministicCheck("Bash", { command }, "/tmp"), null, command);
+  }
+});
+
+test("supervision: git safety spares --force-with-lease and flags -f to main", () => {
+  assert.equal(checkGitSafety({ command: "git push --force-with-lease origin main" }), null);
+  assert.equal(checkGitSafety({ command: "git push origin main --force-with-lease" }), null);
+  assert.equal(checkGitSafety({ command: "git push -f origin main" })?.decision, "ask");
+});
+
+test("supervision: a staged .env asks, .env.example does not, and -a sees unstaged tracked changes", () => {
+  const repo = mkdtempSync(join(tmpdir(), "jev-git-"));
+  // Isolated from the developer's global git config: a global excludes file
+  // that ignores .env (common) would otherwise refuse the add below.
+  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", HOME: repo };
+  const git = (...args) => execFileSync("git", ["-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe", env: gitEnv });
+  git("init", "-q");
+  git("config", "user.email", "t@example.com");
+  git("config", "user.name", "t");
+  writeFileSync(join(repo, ".env.example"), "KEY=\n");
+  writeFileSync(join(repo, ".env"), "KEY=real\n");
+
+  git("add", ".env.example");
+  assert.equal(checkGitSafety({ command: "git commit -m x", cwd: repo }), null, "a template is meant to be committed");
+
+  git("add", "-f", ".env");
+  assert.equal(checkGitSafety({ command: "git commit -m x", cwd: repo })?.decision, "ask");
+
+  git("commit", "-q", "-m", "seed");
+  writeFileSync(join(repo, ".env"), "KEY=changed\n");
+  assert.equal(checkGitSafety({ command: "git commit -m x", cwd: repo }), null, "an unstaged change is not committed by a plain commit");
+  assert.equal(checkGitSafety({ command: "git commit -am x", cwd: repo })?.decision, "ask", "-a stages it at commit time");
+});
+
+test("supervision: the DoD gate recognises Claude Code and Codex edit tools", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-dod-names-"));
+  const write = (name, lines) => {
+    const path = join(dir, name);
+    writeFileSync(path, lines.map((l) => JSON.stringify(l)).join("\n"));
+    return path;
+  };
+  const call = (id, name, input) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+  const done = (id) => ({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: [{ type: "text", text: "ok" }] }] } });
+
+  const claudeEdit = write("claude.jsonl", [call("e1", "Edit", { file_path: "/a/b.ts" }), done("e1")]);
+  assert.equal((await checkDefinitionOfDone({ transcriptPath: claudeEdit })).allow, false, "an Edit with no test afterwards");
+
+  const codexPatch = write("codex.jsonl", [call("p1", "apply_patch", { patch: "*** Begin Patch" }), done("p1")]);
+  assert.equal((await checkDefinitionOfDone({ transcriptPath: codexPatch })).allow, false, "an apply_patch with no test afterwards");
+
+  const tested = write("tested.jsonl", [
+    call("e1", "Edit", { file_path: "/a/b.ts" }), done("e1"),
+    call("t1", "Bash", { command: "npm test" }), done("t1"),
+  ]);
+  assert.equal((await checkDefinitionOfDone({ transcriptPath: tested })).allow, true);
+});
+
+test("antigravity: AllowMultiple maps to replace_all, so a repeated target is not a false deny", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-agy-multi-"));
+  const file = join(dir, "c.txt");
+  writeFileSync(file, "x = 1\nx = 1\n");
+  const denied = runAgy(agyCall("replace_file_content", { TargetFile: file, TargetContent: "x = 1", ReplacementContent: "x = 2" }));
+  assert.equal(denied.decision, "deny");
+  assert.match(denied.reason, /appears 2 times/);
+  const allowed = runAgy(agyCall("replace_file_content", { TargetFile: file, TargetContent: "x = 1", ReplacementContent: "x = 2", AllowMultiple: true }));
+  assert.equal(allowed, null, "the user asked for every occurrence; nothing to deny");
+});
+
+const { latestUserRequest, stripInjectedBlocks } = await import("../lib/transcript.mjs");
+
+test("latestUserRequest drops host-injected blocks and keeps what the user typed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-injected-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, [
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "<system-reminder>\nContents of CLAUDE.md, thousands of characters.\n</system-reminder>" },
+          { type: "text", text: "fix the flaky test" },
+        ],
+      },
+    },
+    { type: "user", message: { role: "user", content: "<bash-input>ls</bash-input><bash-stdout>a b</bash-stdout>" } },
+  ].map((l) => JSON.stringify(l)).join("\n"));
+  assert.equal(latestUserRequest(path), "fix the flaky test");
+  assert.equal(stripInjectedBlocks("question\n\n<system-reminder>x</system-reminder>"), "question");
+  assert.equal(stripInjectedBlocks("<task-notification>\nstill open"), "", "an unterminated injected block is not a request");
+  assert.equal(stripInjectedBlocks("<request>keep me</request>"), "<request>keep me</request>", "unknown tags are the user's own");
 });

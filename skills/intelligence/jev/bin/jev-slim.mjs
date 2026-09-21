@@ -59,22 +59,30 @@ async function runExec() {
   const shell = process.env.SHELL && /bash|zsh/.test(process.env.SHELL) ? process.env.SHELL : "/bin/bash";
   const child = spawn(shell, ["-c", command], { stdio: ["inherit", "pipe", "pipe"] });
 
-  let out = "";
-  let err = "";
-  child.stdout.on("data", (chunk) => (out += chunk));
-  child.stderr.on("data", (chunk) => (err += chunk));
+  // Collected as buffers and decoded once: appending chunks as strings
+  // splits multi-byte characters at chunk boundaries and turns `─` into `��`.
+  const outChunks = [];
+  const errChunks = [];
+  child.stdout.on("data", (chunk) => outChunks.push(chunk));
+  child.stderr.on("data", (chunk) => errChunks.push(chunk));
 
   const code = await new Promise((resolve) => {
     child.on("error", () => resolve(127));
     child.on("close", (c, signal) => resolve(signal ? 128 : (c ?? 0)));
   });
 
+  const rawOut = Buffer.concat(outChunks);
+  const rawErr = Buffer.concat(errChunks);
+
   // A command that failed is the one whose output you must not touch.
   if (code !== 0) {
-    process.stdout.write(out);
-    if (err) process.stderr.write(err);
+    process.stdout.write(rawOut);
+    if (rawErr.length) process.stderr.write(rawErr);
     process.exit(code);
   }
+
+  const out = rawOut.toString("utf8");
+  const err = rawErr.toString("utf8");
 
   const started = Date.now();
   let result;

@@ -56,7 +56,7 @@ node evals/runner.mjs \
   --format json > comparison.json
 ```
 
-No package changes are required. The only required runtime is Node.js with built-in `fs`, `node:test`, and URL/path modules. The existing skill package's Node requirement is Node `>=16`; use a current Node release for the test runner. If the repository adds a convenience script, it can map `eval:self-test` to `node --test evals/self-test.mjs` without adding a dependency.
+No package changes are required. The only required runtime is Node.js with built-in `fs`, `node:test`, and URL/path modules. The package declares Node `>=22`, which is what the test runner and this harness are exercised on; the hooks themselves run on Node 18+. `npm run eval:self-test` maps to `node --test evals/self-test.mjs` with no added dependency.
 
 ## Trace contract
 

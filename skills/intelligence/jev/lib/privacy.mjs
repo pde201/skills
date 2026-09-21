@@ -53,10 +53,31 @@ const SENSITIVE_KEY_NAMES = new Set([
 ]);
 
 const PEM_PRIVATE_KEY = /-----BEGIN(?: [A-Z0-9]+)* PRIVATE KEY-----[\s\S]*?-----END(?: [A-Z0-9]+)* PRIVATE KEY-----/gi;
-const CREDENTIAL_ASSIGNMENT = /((?:^|[^a-z0-9])(?:api[\s_-]?key|access[\s_-]?token|auth(?:orization)?|client[\s_-]?secret|credential|password|passwd|passphrase|private[\s_-]?key|refresh[\s_-]?token|secret|session[\s_-]?token)\b\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;\]}]+)/gi;
+// A value is anything up to the next delimiter — unless an earlier pattern
+// already replaced it, which the lookahead leaves alone.
+const CREDENTIAL_ASSIGNMENT = /((?:^|[^a-z0-9])(?:api[\s_-]?key|access[\s_-]?token|auth(?:orization)?|client[\s_-]?secret|credential|password|passwd|passphrase|private[\s_-]?key|refresh[\s_-]?token|secret|session[\s_-]?token|token)\b\s*[:=]\s*)(?!\[REDACTED\])(?:"[^"]*"|'[^']*'|[^\s,;\]}]+)/gi;
+// Environment-style names: AWS_SECRET_ACCESS_KEY=…, GITHUB_TOKEN=…, DB_PASSWORD: ….
+// The word list above needs a word boundary after the keyword, which an
+// underscore defeats, so upper-case compound names get their own pattern.
+const ENV_ASSIGNMENT = /(\b[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD|CREDENTIALS?)[A-Z0-9_]*\s*[:=]\s*)(?!\[REDACTED\])(?:"[^"]*"|'[^']*'|[^\s,;\]}]+)/g;
+// Token shapes that identify themselves by prefix, wherever they appear.
+const KNOWN_TOKENS = [
+  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g,           // GitHub
+  /\bgithub_pat_[A-Za-z0-9_]{20,}\b/g,                          // GitHub fine-grained
+  /\bglpat-[A-Za-z0-9_-]{20,}\b/g,                              // GitLab
+  /\bsk-[A-Za-z0-9_-]{16,}\b/g,                                 // OpenAI, Anthropic
+  /\bsk_(?:live|test)_[A-Za-z0-9]{10,}\b/g,                     // Stripe
+  /\bAKIA[0-9A-Z]{16}\b/g,                                      // AWS access key id
+  /\bxox[abprs]-[A-Za-z0-9-]{10,}\b/g,                          // Slack
+  /\bAIza[0-9A-Za-z_-]{35}\b/g,                                 // Google API
+  /\bapikey_[A-Za-z0-9_]{20,}\b/g,                              // TypeSafe
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, // JWT
+];
 const BEARER_TOKEN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
 const URL_CREDENTIAL = /([a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:)[^\s/@]+@/gi;
-// Covers the common hyphenated, spaced, and contiguous nine-digit forms.
+// Covers the common hyphenated, spaced, and contiguous nine-digit forms. The
+// contiguous form also catches nine-digit identifiers that are not SSNs; that
+// over-redaction is accepted because the hooks run against mortgage data.
 const SSN_SHAPED = /\b\d{3}(?:[- ]?\d{2})[- ]?\d{4}\b/g;
 
 const normalizedKey = (key) => String(key).replace(/[^a-z0-9]/gi, "").toLowerCase();
@@ -81,31 +102,40 @@ export function isSensitiveKey(key) {
 /** Redact known secret and SSN-shaped material from free text. */
 export function redactText(value) {
   if (typeof value !== "string") return value;
-  return value
+  let out = value
     .replace(PEM_PRIVATE_KEY, REDACTED)
     .replace(BEARER_TOKEN, `Bearer ${REDACTED}`)
     .replace(CREDENTIAL_ASSIGNMENT, `$1${REDACTED}`)
+    .replace(ENV_ASSIGNMENT, `$1${REDACTED}`)
     .replace(URL_CREDENTIAL, `$1${REDACTED}@`)
     .replace(SSN_SHAPED, REDACTED);
+  for (const pattern of KNOWN_TOKENS) out = out.replace(pattern, REDACTED);
+  return out;
 }
 
-function redact(value, seen, key) {
+function redact(value, ancestors, key) {
   if (key !== undefined && isSensitiveKey(key)) return REDACTED;
   if (typeof value === "string") return redactText(value);
   if (value === null || typeof value !== "object") return value;
 
   // State sent to the API should be JSON-shaped. A cycle cannot be serialized
   // safely, so make the problematic branch harmless instead of echoing it.
-  if (seen.has(value)) return REDACTED;
-  seen.add(value);
+  // Only the chain of ancestors counts as a cycle: the same object reached
+  // twice through different keys (two questions sharing one criteria map) is
+  // ordinary JSON and must come through both times.
+  if (ancestors.has(value)) return REDACTED;
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) return value.map((entry) => redact(entry, ancestors));
 
-  if (Array.isArray(value)) return value.map((entry) => redact(entry, seen));
-
-  const out = {};
-  for (const [childKey, childValue] of Object.entries(value)) {
-    out[childKey] = redact(childValue, seen, childKey);
+    const out = {};
+    for (const [childKey, childValue] of Object.entries(value)) {
+      out[childKey] = redact(childValue, ancestors, childKey);
+    }
+    return out;
+  } finally {
+    ancestors.delete(value);
   }
-  return out;
 }
 
 /** Deep-copy a value while redacting sensitive fields and free-text patterns. */

@@ -11,21 +11,31 @@ for installation, troubleshooting, data handling, and evaluation.
 
 - `bin/jev-hook*.mjs` translates each host's events and verdicts.
 - `lib/guard.mjs` runs deterministic checks before model hazard scoring.
+- `lib/wrap.mjs` decides which shell commands are worth routing through the
+  slimmer and builds the rewrite; `lib/config.mjs` holds every knob and default.
 - `lib/slim.mjs` preserves full local output and selects ranked blocks only after
   a valid response. `bin/jev-slim.mjs` supplies exec and filter modes.
+- `lib/supervision.mjs` provides git safety, thrashing and goal-drift detection,
+  error triage, and the Definition of Done gate.
 - `lib/carryforward.mjs` preserves chronological user context and selects optional
   history. Historical requests and failures require reconciliation with later turns.
-- `lib/client.mjs` handles redacted remote requests and response validation.
+- `lib/transcript.mjs` reads each host's transcript format and strips the text
+  hosts inject into user turns (system reminders, hook notices, terminal relays).
+- `lib/client.mjs` handles redacted remote requests and response validation;
+  `lib/privacy.mjs` is the redaction and private-file layer both use.
 - `lib/log.mjs` records decisions for investigation and labeled evaluation.
 
-Default adapters never self-approve calls. Opt-in compatibility approval switches
-are explicit exceptions, not part of that guarantee. Missing credentials leave
-local deterministic features active. Model/API failure adds no model restriction
-and leaves output intact; Jev is not an enforcement boundary.
+The guard never self-approves a call. Slimming self-approval exists where a host
+requires it: Antigravity pairs an `overwrite` with `decision: "allow"` by default
+because it fails closed without one; Codex does so only under
+`JEV_CODEX_SLIM_ALLOW=1`; Claude Code never. Missing credentials leave local
+deterministic features active. Model/API failure adds no model restriction and
+leaves output intact; Jev is not an enforcement boundary.
 
 ## Validation
 
-Node 22+ and `jq` are required for the full offline suite. Run from this directory:
+Node 18+ runs the hooks (built-in `fetch`). Node 22+ and `jq` are required for
+the full offline suite. Run from this directory:
 
 ```bash
 npm test

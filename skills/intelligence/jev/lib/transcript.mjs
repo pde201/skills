@@ -96,7 +96,8 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
     if (Array.isArray(entry?.tool_calls)) {
       for (const call of entry.tool_calls) {
         const id = call.id ?? String(entry.step_index ?? Math.random());
-        calls.push({ tool: call.name, input: summarizeInput(call.args ?? call.input), failed: false, id });
+        const failed = Boolean(entry?.status === "ERROR" || call?.status === "ERROR" || call?.is_error || entry?.is_error);
+        calls.push({ tool: call.name, input: summarizeInput(call.args ?? call.input), failed, id });
       }
     } else if (entry?.source === "MODEL" && entry?.type === "GENERIC" && calls.length > 0) {
       const lastCall = calls[calls.length - 1];

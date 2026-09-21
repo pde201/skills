@@ -88,14 +88,23 @@ jq --arg cmd "$HOOK_CMD" --arg matcher "$MATCHER" '
     ],
     PreInvocation: [
       { type: "command", command: $cmd, timeout: 10 }
+    ],
+    PostToolUse: [
+      { matcher: "*",
+        hooks: [ { type: "command", command: $cmd, timeout: 10 } ] }
+    ],
+    Stop: [
+      { type: "command", command: $cmd, timeout: 15 }
     ]
   }
 ' "$HOOKS" > "$tmp"
 
 jq empty "$tmp" || { warn "refusing to write invalid JSON; hooks untouched"; rm -f "$tmp"; exit 1; }
 mv "$tmp" "$HOOKS"
-ok "PreToolUse registered for: $MATCHER (guard and command slimming)"
-ok "PreInvocation registered (context carry-forward)"
+ok "PreToolUse registered for: $MATCHER (guard, git safety, command slimming)"
+ok "PreInvocation registered (context carry-forward and thrashing gate)"
+ok "PostToolUse registered (error triage)"
+ok "Stop registered (definition of done verification gate)"
 
 mkdir -p "$BIN_DIR"
 ln -sfn "$JEV_DIR/bin/jev-slim.mjs" "$BIN_DIR/jev-slim"
@@ -132,8 +141,10 @@ cat <<EOF
   Installed. Restart Antigravity to pick the hooks up.
 
   Registered capabilities:
-  - PreToolUse: command slimming (via overwrite) & safety guarding
-  - PreInvocation: single-use context carry-forward briefs
+  - PreToolUse: command slimming (via overwrite), safety guarding & git safety
+  - PreInvocation: context carry-forward briefs & thrashing/drift guidance
+  - PostToolUse: structured error triage
+  - Stop: Definition of Done (DoD) verification gate
 
   If this build reads a different hooks.json, check:
 

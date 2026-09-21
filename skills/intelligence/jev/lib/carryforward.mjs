@@ -54,9 +54,24 @@ export function harvest(transcriptPath) {
     const role = message?.role ?? entry?.type;
     const content = message?.content;
 
-    if (role === "user" && !Array.isArray(content)) {
+    if ((role === "user" || role === "USER_INPUT" || entry?.source === "USER_EXPLICIT") && !Array.isArray(content)) {
       // Preserve history; the consumer reconciles later corrections and completion.
-      add("request", textOf(content), true);
+      const rawText = textOf(content);
+      const userText = rawText.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/)?.[1] ?? rawText;
+      if (userText.trim()) add("request", userText.trim(), true);
+    }
+
+    if (Array.isArray(entry?.tool_calls)) {
+      for (const call of entry.tool_calls) {
+        const args = call.args ?? call.input ?? {};
+        if (call.name === "replace_file_content" || call.name === "edit_file") {
+          add("change", `${call.name} ${args.TargetFile ?? ""}`);
+        } else if (call.name === "write_to_file" || call.name === "create_file") {
+          add("change", `${call.name} ${args.TargetFile ?? ""}`);
+        } else if (call.name === "run_command" && typeof args.CommandLine === "string") {
+          add("action", `ran: ${args.CommandLine}`);
+        }
+      }
     }
 
     if (!Array.isArray(content)) continue;

@@ -22,12 +22,13 @@ Usage (npm's npx cannot resolve a git subdirectory's manifest before
 installing, so fetch via a sparse clone instead of "npx github:..."):
   git clone --filter=blob:none --sparse --depth 1 https://github.com/pde201/skills.git /tmp/jev-install
   git -C /tmp/jev-install sparse-checkout set skills/intelligence/jev
-  node /tmp/jev-install/skills/intelligence/jev/bin/install.js [codex|claude] [--force]
+  node /tmp/jev-install/skills/intelligence/jev/bin/install.js [codex|claude|antigravity] [--force]
   node /tmp/jev-install/skills/intelligence/jev/bin/install.js --dest /path/to/skills-dir [--force]
 
 Targets:
-  codex   Install to \${CODEX_HOME:-$HOME/.codex}/skills
-  claude  Install to \${CLAUDE_HOME:-$HOME/.claude}/skills
+  codex        Install to \${CODEX_HOME:-$HOME/.codex}/skills
+  claude       Install to \${CLAUDE_HOME:-$HOME/.claude}/skills
+  antigravity  Install to \${ANTIGRAVITY_HOME:-$HOME/.gemini/config}/skills
 
 Options:
   --dest DIR  Install into a custom skills directory
@@ -51,7 +52,7 @@ function parseArgs(argv) {
 
   while (args.length) {
     const arg = args.shift();
-    if (arg === "codex" || arg === "claude") {
+    if (arg === "codex" || arg === "claude" || arg === "antigravity") {
       target = arg;
     } else if (arg === "--dest") {
       if (!args.length) {
@@ -99,6 +100,9 @@ function copyFile(source, destination) {
 function defaultDestBase(target) {
   if (target === "claude") {
     return path.join(process.env.CLAUDE_HOME || path.join(os.homedir(), ".claude"), "skills");
+  }
+  if (target === "antigravity") {
+    return path.join(process.env.ANTIGRAVITY_HOME || path.join(os.homedir(), ".gemini", "config"), "skills");
   }
   return path.join(process.env.CODEX_HOME || path.join(os.homedir(), ".codex"), "skills");
 }

@@ -773,3 +773,49 @@ test("guardQuestions with no call still returns every question", () => {
   assert.ok("invented_target" in asked);
   assert.equal(Object.keys(asked).length, 7);
 });
+
+// ── what a read-only call is allowed to interrupt for ────────────────
+//
+// A call that changes nothing is cheap to be wrong about: it fails, or
+// wastes a few tokens, and the model corrects itself. Two hazards are
+// exempt, for two different reasons — one whose damage lands on read, and
+// one that is itself proof the self-correction premise has failed.
+
+test("an off-task read is not worth interrupting for", () => {
+  // The exact numbers Jev returned on 2026-09-21 for `cat
+  // src/services/billing/StripeWebhookHandler.ts` under the task "fix the
+  // failing login test". Reading the wrong file costs a few tokens.
+  const { decision, fired, suppressed } = decide(
+    { intent_mismatch: 0.57, invented_target: 0.77 },
+    reach(0),
+  );
+  assert.equal(decision, ALLOW);
+  assert.deepEqual(fired, {}, "neither hazard contributed to the decision");
+  assert.equal(suppressed.intent_mismatch, 0.57, "but both are kept for the log");
+  assert.equal(suppressed.invented_target, 0.77);
+});
+
+test("a read that would print a credential still denies", () => {
+  const { decision, fired, suppressed } = decide(
+    { secret_exposure: 0.95, intent_mismatch: 0.6 },
+    reach(0.01),
+  );
+  assert.equal(decision, DENY);
+  assert.deepEqual(Object.keys(fired), ["secret_exposure"], "only the exempt hazard decided it");
+  assert.equal(suppressed.intent_mismatch, 0.6, "the rest are set aside, not dropped");
+});
+
+test("a read that repeats one which just failed still asks", () => {
+  // Not because the read does damage, but because this hazard is the
+  // evidence that the gate's premise — the model corrects itself — is
+  // false. A read-only loop still burns the context window.
+  const { decision, fired } = decide({ repeat_failure: 0.97, intent_mismatch: 0.6 }, reach(0.3));
+  assert.equal(decision, ASK);
+  assert.deepEqual(Object.keys(fired), ["repeat_failure"]);
+});
+
+test("the gate applies only to reads — a change is judged as before", () => {
+  assert.equal(decide({ intent_mismatch: 0.57 }, reach(1.06)).decision, ASK);
+  assert.equal(decide({ invented_target: 0.77 }, reach(1.5)).decision, ASK);
+  assert.equal(decide({ destructive_unrequested: 0.9 }, reach(2)).decision, DENY);
+});

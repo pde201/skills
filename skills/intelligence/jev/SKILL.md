@@ -229,6 +229,14 @@ evidence is an obvious inference, not a guess. No threshold separates that
 moved the classes apart — conventional paths below `ask`, fabricated ones
 at 0.59 and 0.71 — which no amount of moving the number could have done.
 
+**A tool call that only reads is interrupted for two things and no
+others**: `secret_exposure`, whose damage lands on read, and
+`repeat_failure`, which is evidence the model has stopped correcting
+itself. Everything else is set aside and logged under `suppressed`. If a
+user asks why a questionable-looking read went through, that is the
+answer — and the deterministic checks still run first, so a catastrophic
+command asks regardless of reach.
+
 Before reaching for either the number or the wording, check that the
 question applied at all. `invented_target` is skipped for calls that name
 nothing path-shaped, because asking a call like `npm ci` whether it

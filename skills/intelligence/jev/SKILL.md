@@ -31,7 +31,7 @@ When a tool call is blocked (`deny`) or requires user escalation (`ask`):
    ```
    Guard records are logged with `hook: "PreToolUse"` (there is no `"guard"` hook name). `suppressed` and `not_asked` are nested inside `signals`, not top-level. Git-safety records carry `gitSafety: true` and, on Claude Code, no `by` field; slimming records carry `wrapped`.
 2. Identify the decider (`by`):
-   - `by: "code"`: Deterministic check triggered (e.g. non-existent file path, absent/ambiguous edit string, directory read, catastrophic shell pattern such as `rm -rf /`, `--no-preserve-root`, `git push --force`/`-f`, `git reset --hard`, `curl | sh`). Fix the tool arguments in the agent prompt.
+   - `by: "code"`: Deterministic check triggered (e.g. non-existent file path, absent/ambiguous edit string, directory read, a Read of a credential-shaped path such as `.env` or `id_rsa`, catastrophic shell pattern such as `rm -rf /`, `--no-preserve-root`, `git push --force`/`-f`, `git reset --hard`, `curl | sh`). Fix the tool arguments in the agent prompt. Reads get deterministic checks only unless `JEV_GUARD_READ_MODEL=1`; their record says `read-only tool: deterministic checks only`.
    - `by: "jev"`: Model probability threshold crossed. Every hazard asks at `JEV_GUARD_ASK_AT` (default 0.45); the two deny-action hazards (`destructive_unrequested`, `secret_exposure`) deny at `JEV_GUARD_DENY_AT` (default 0.85), the rest never exceed `ask`. Inspect `signals` for the fired hazard scores, `signals.suppressed` for hazards set aside, and `signals.blast_radius` (0–4, with `blast_radius_label`) for reach. Reach never fires alone: at or above `JEV_GUARD_BLAST_RADIUS_BLOCK` (default 3) it upgrades an existing `ask` to `deny`.
 3. Validate against read-only invariant:
    - Calls Jev scores as read-only (`blast_radius` below 1) are interrupted ONLY for `secret_exposure` or `repeat_failure`. All other read hazards are suppressed to prevent interruption fatigue.
@@ -83,7 +83,7 @@ To filter or execute commands using Jev directly:
 jev-slim exec --task "<goal>" -- '<command>'
 <command> | jev-slim filter --task "<goal>"
 ```
-*Note*: `exec` preserves non-zero exit codes and output on error, and is the only mode that can. `filter` operates purely on the stdout stream and cannot know an upstream exit status.
+*Note*: `exec` preserves non-zero exit codes and output on error, and is the only mode that can. `filter` operates purely on the stdout stream and cannot know an upstream exit status. The hooks pass the task as `--task-file <path>` (a private per-session file under `JEV_STATE_DIR`) rather than inline; `--task-b64` remains for callers that cannot write there.
 
 ---
 
@@ -91,7 +91,7 @@ jev-slim exec --task "<goal>" -- '<command>'
 
 1. **Non-Zero Exit Preservation**: Commands that fail (exit code != 0) are NEVER slimmed. Full failure output and exit status are preserved, byte for byte.
 2. **No Autonomous Privilege Escalation**: The guard never emits `allow`; it only escalates to `ask` or `deny` and otherwise stays silent, leaving the host's own permission prompt in force. The one exception is slimming self-approval: on Antigravity a rewritten command is paired with `decision: "allow"` because the host fails closed without a decision, and `JEV_ANTIGRAVITY_EXPLICIT_ALLOW=1` extends that to every untripped call; on Codex `JEV_CODEX_SLIM_ALLOW=1` pairs the rewrite with `permissionDecision: "allow"` and is off by default. The Claude Code adapter never emits `allow`.
-3. **Safe Fail-Open**: Missing `TYPESAFE_API_KEY`, API timeouts, network failures, or malformed JSON payload will fail open. The host session continues uninterrupted; deterministic checks continue locally.
+3. **Safe Fail-Open**: Missing `TYPESAFE_API_KEY`, API timeouts, network failures, or malformed JSON payload will fail open. The host session continues uninterrupted; deterministic checks continue locally. After `JEV_BREAKER_FAILURES` consecutive provider failures (5xx, 429, timeout, network) remote judgments are skipped for `JEV_BREAKER_COOLDOWN_MS` and the record says `circuit open`; one trial request goes out when the cooldown ends.
 4. **Zero Silent Dropping**: Output truncation always counts hidden lines and writes the full raw text to a disk artifact before returning. A carry-forward brief longer than the host's 10,000-character context cap is injected bounded, newest entries first, with a trailer naming the `.full.md` file that holds the whole brief.
 
 ---
@@ -114,17 +114,20 @@ jev-slim exec --task "<goal>" -- '<command>'
 | `JEV_GUARD_ASK_AT` | `0.45` | Hazard probability at which the guard escalates to `ask`. |
 | `JEV_GUARD_DENY_AT` | `0.85` | Probability at which a deny-action hazard (`destructive_unrequested`, `secret_exposure`) escalates to `deny`; other hazards stop at `ask`. |
 | `JEV_GUARD_BLAST_RADIUS_BLOCK` | `3` | Blast-radius score (0–4) at or above which an `ask` becomes a `deny`. Reach alone never escalates. |
+| `JEV_GUARD_READ_MODEL` | `0` | `1` sends Read calls to the model as well. Off, a Read gets the deterministic checks only, asking on credential-shaped paths. |
 | `JEV_THRASHING_THRESHOLD` | `0.75` | Probability above which a thrashing/drift warning is injected. |
 | `JEV_SLIM_MIN_LINES` | `60` | Output shorter than this is never slimmed. |
-| `JEV_SLIM_COMMANDS` | npm, pytest, cargo, kubectl, git, grep, … (see `lib/config.mjs`) | Comma-separated binaries whose output is routed through the slimmer. |
+| `JEV_SLIM_COMMANDS` | npm, pytest, cargo, kubectl, find, rg, curl, … (see `lib/config.mjs`) | Comma-separated binaries whose output is routed through the slimmer. git, gh, grep and ls are not in the default: on real sessions they were 53 of 59 wrapped commands and slimmed nothing. |
 | `JEV_NEVER_WRAP` | vim, less, tail, ssh, tmux, claude, codex, … | Comma-separated binaries never wrapped, whatever else the command contains. |
 | `JEV_CODEX_SLIM_ALLOW` | `0` | Codex only: pair a slimmed rewrite with `permissionDecision: "allow"`. |
 | `JEV_ANTIGRAVITY_EXPLICIT_ALLOW` | `0` | Antigravity only: emit `decision: "allow"` on untripped calls instead of staying silent. |
 | `JEV_TASK` | *(None)* | `jev-slim` CLI only: the task text when neither `--task` nor `--task-b64` is given. |
 | `JEV_LOG` | `<JEV_STATE_DIR>/jev-log.jsonl` | Target decision log path. |
-| `JEV_STATE_DIR` | `~/.local/state/jev-hooks` | Directory for briefs, stashed prompts and the decision log. Full slim output is written to a private directory under the OS temp dir, not here. |
+| `JEV_STATE_DIR` | `~/.local/state/jev-hooks` | Directory for briefs, stashed prompts, per-session task files, the breaker state and the decision log. Full slim output is written to a private directory under the OS temp dir, not here. |
 | `JEV_TIMEOUT_MS` | `4000` | Per-attempt timeout for guard and slimming judgments before failing open. Supervision calls use fixed shorter budgets (2–2.5 s); carry-forward uses at least 8 s. |
 | `JEV_RETRIES` | `1` | Retries after a timeout, 429 or 5xx. The total wait is `(retries + 1) × timeout` plus backoff. |
+| `JEV_BREAKER_FAILURES` | `3` | Consecutive provider failures (after retries) that open the circuit; `0` disables it. 4xx and malformed answers never count. |
+| `JEV_BREAKER_COOLDOWN_MS` | `60000` | How long remote judgments are skipped once the circuit is open. State in `<JEV_STATE_DIR>/breaker.json`; delete it to reset. |
 
 Install-time overrides (`CLAUDE_SETTINGS`, `CODEX_HOME`, `CODEX_HOOKS`, `JEV_ANTIGRAVITY_HOOKS`, `JEV_ANTIGRAVITY_MATCHER`, `CLAUDE_HOME`, `ANTIGRAVITY_HOME`) are listed in [references/integrations.md](references/integrations.md).
 

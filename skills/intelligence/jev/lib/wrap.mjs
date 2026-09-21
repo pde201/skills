@@ -9,7 +9,11 @@
 
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
+import { readFileSync, readdirSync, statSync, unlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import config from "./config.mjs";
+import { stateDir } from "./log.mjs";
+import { writePrivateFile } from "./privacy.mjs";
 
 export const SLIM_BIN = join(dirname(dirname(fileURLToPath(import.meta.url))), "bin", "jev-slim.mjs");
 
@@ -70,7 +74,70 @@ export function shouldWrap(command) {
   return { wrap: true, why: match };
 }
 
-export function rewrite(command, task) {
-  const taskArg = task ? ` --task-b64 ${shellQuote(Buffer.from(task, "utf8").toString("base64"))}` : "";
+// ── The task file ────────────────────────────────────────────────────
+//
+// The slimmer needs the user's request to judge relevance. Passing it
+// inline as base64 put ~2 KB of opaque text into every rewritten command,
+// which the host then shows and stores in its transcript — the layer
+// meant to save context was spending it. So the task goes to a small
+// private file, one per session, and the command carries only its path.
+
+const TASK_FILE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
+
+const taskId = (task, key) =>
+  createHash("sha256").update(key ? `session:${key}` : `task:${task}`).digest("hex").slice(0, 32);
+
+const taskPath = (task, key) => join(stateDir(), `task-${taskId(task, key)}.txt`);
+
+function sweepTaskFiles(dir) {
+  try {
+    const now = Date.now();
+    for (const name of readdirSync(dir)) {
+      if (!name.startsWith("task-") || !name.endsWith(".txt")) continue;
+      const path = join(dir, name);
+      try {
+        if (now - statSync(path).mtimeMs > TASK_FILE_MAX_AGE_MS) unlinkSync(path);
+      } catch { /* raced with another hook */ }
+    }
+  } catch { /* the sweep is housekeeping, never a failure */ }
+}
+
+/**
+ * Write the task where jev-slim can read it and return the path. Keyed by
+ * session when one is known, so a session overwrites one file as its
+ * requests change; by content otherwise.
+ */
+export function stashTask(task, key) {
+  const path = taskPath(task, key);
+  try {
+    if (readFileSync(path, "utf8") === task) return path;
+  } catch { /* not written yet */ }
+  writePrivateFile(path, task);
+  sweepTaskFiles(dirname(path));
+  return path;
+}
+
+/** Remove a session's task file, for hosts that announce session end. */
+export function dropTask(key) {
+  if (!key) return;
+  try { unlinkSync(taskPath("", key)); } catch { /* nothing stashed */ }
+}
+
+/**
+ * @param {string} command
+ * @param {string} task      the latest user request, or ""
+ * @param {{key?: string}} [opts]  session id, when the host provides one
+ */
+export function rewrite(command, task, { key } = {}) {
+  let taskArg = "";
+  if (task) {
+    try {
+      taskArg = ` --task-file ${shellQuote(stashTask(task, key))}`;
+    } catch {
+      // A state directory that cannot be written is not a reason to lose
+      // the task; the inline form still works, it is just bulkier.
+      taskArg = ` --task-b64 ${shellQuote(Buffer.from(task, "utf8").toString("base64"))}`;
+    }
+  }
   return `node ${shellQuote(SLIM_BIN)} exec${taskArg} -- ${shellQuote(command)}`;
 }

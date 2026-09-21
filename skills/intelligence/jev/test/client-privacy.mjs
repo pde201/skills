@@ -9,6 +9,9 @@ process.env.JEV_STATE_DIR = join(stateRoot, "state");
 delete process.env.JEV_LOG;
 process.env.TYPESAFE_API_KEY = "test-key";
 process.env.JEV_RETRIES = "0";
+// The breaker has its own suite (breaker.mjs); the deliberate failures here
+// must not open it for the tests that follow.
+process.env.JEV_BREAKER_FAILURES = "0";
 
 const { JevUnavailable, choice, noul, score, systemOne } = await import("../lib/client.mjs");
 const { SHAPES, slim } = await import("../lib/slim.mjs");

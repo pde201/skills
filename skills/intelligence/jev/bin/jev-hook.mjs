@@ -126,7 +126,7 @@ async function preToolUse(event) {
     return warningOnly();
   }
 
-  const updated = rewrite(command, task);
+  const updated = rewrite(command, task, { key: event.session_id });
   logDecision({ hook: "PreToolUse", tool: "Bash", wrapped: true, matched: why, command: command.slice(0, 200) });
 
   return emit({

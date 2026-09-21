@@ -8,7 +8,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -23,7 +23,8 @@ process.env.JEV_STATE_DIR = mkdtempSync(join(tmpdir(), "jev-test-"));
 delete process.env.TYPESAFE_API_KEY;
 
 const { denoise, toBlocks, stitch, selectBlocks, slim } = await import("../lib/slim.mjs");
-const { shouldWrap, rewrite, shellQuote } = await import("../lib/wrap.mjs");
+const wrapModule = await import("../lib/wrap.mjs");
+const { shouldWrap, rewrite, shellQuote } = wrapModule;
 const { deterministicCheck, guard, decide, guardQuestions, namesAPath, ALLOW, ASK, DENY } = await import("../lib/guard.mjs");
 const { harvest, composeBrief } = await import("../lib/carryforward.mjs");
 const fixtures = await import("./fixtures.mjs");
@@ -249,6 +250,39 @@ test("interactive, streaming and unknown commands are left alone", () => {
 test("wrapping is idempotent", () => {
   const once = rewrite("npm test", "run the tests");
   assert.equal(shouldWrap(once).wrap, false);
+});
+
+test("git, gh, grep and ls are no longer wrapped by default; other bloat sources still are", () => {
+  // 53 of 59 wrapped commands on real sessions, and not one of them slimmed.
+  for (const command of ["git status", "git log --oneline", "gh pr list", "grep -rn foo src", "ls -la"]) {
+    assert.deepEqual(shouldWrap(command), { wrap: false, why: "not a known bloat source" }, command);
+  }
+  for (const command of ["rg foo", "find . -name '*.ts'", "npm test", "kubectl get pods"]) {
+    assert.equal(shouldWrap(command).wrap, true, command);
+  }
+});
+
+test("the task travels in a private per-session file, not inline", () => {
+  const { stashTask, dropTask } = wrapModule;
+  const first = rewrite("npm test", "fix the build", { key: "session-a" });
+  const path = first.match(/--task-file '([^']+)'/)?.[1];
+  assert.ok(path, "the rewrite must reference a task file");
+  assert.equal(readFileSync(path, "utf8"), "fix the build");
+  assert.equal((statSync(path).mode & 0o777), 0o600);
+  assert.ok(!first.includes("--task-b64"), "no inline base64");
+
+  // Same session, new request: the same file is overwritten, not a new one.
+  const second = rewrite("npm test", "now fix the tests", { key: "session-a" });
+  assert.equal(second.match(/--task-file '([^']+)'/)?.[1], path);
+  assert.equal(readFileSync(path, "utf8"), "now fix the tests");
+
+  // No session id: content-addressed, so identical tasks share one file.
+  assert.equal(stashTask("same task"), stashTask("same task"));
+  assert.notEqual(stashTask("same task"), path);
+
+  dropTask("session-a");
+  assert.equal(existsSync(path), false, "a host that announces session end can clean up");
+  assert.ok(rewrite("npm test", "").endsWith(`-- 'npm test'`), "no task, no task argument");
 });
 
 test("shellQuote survives a round trip through the shell", () => {
@@ -675,10 +709,12 @@ test("codex: the stashed prompt becomes the task the slimmer is given", () => {
     session_id: session,
     cwd: process.cwd(),
   });
-  const b64 = Buffer.from(prompt, "utf8").toString("base64");
+  const match = result.hookSpecificOutput.updatedInput.command.match(/--task-file '([^']+)'/);
+  assert.ok(match, "the rewritten command must point at a task file");
+  assert.equal(readFileSync(match[1], "utf8"), prompt, "and that file must hold the stashed request");
   assert.ok(
-    result.hookSpecificOutput.updatedInput.command.includes(b64),
-    "the rewritten command must carry the stashed request",
+    !result.hookSpecificOutput.updatedInput.command.includes(Buffer.from(prompt, "utf8").toString("base64")),
+    "the request no longer travels inline as base64",
   );
 });
 
@@ -1250,6 +1286,37 @@ test("antigravity: AllowMultiple maps to replace_all, so a repeated target is no
   assert.match(denied.reason, /appears 2 times/);
   const allowed = runAgy(agyCall("replace_file_content", { TargetFile: file, TargetContent: "x = 1", ReplacementContent: "x = 2", AllowMultiple: true }));
   assert.equal(allowed, null, "the user asked for every occurrence; nothing to deny");
+});
+
+test("a Read is judged by code alone: ordinary files pass with no model call, credential-shaped paths ask", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-read-guard-"));
+  const env = { TYPESAFE_API_KEY: "test-key-that-must-never-be-sent" };
+  const envFile = join(dir, ".env");
+  const template = join(dir, ".env.example");
+  const pem = join(dir, "server.pem");
+  for (const f of [envFile, template, pem]) writeFileSync(f, "x\n");
+
+  let before = logCount();
+  assert.equal(runHook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: join(ROOT, "package.json") } }, env), null);
+  let record = logRecordsSince(before).find((r) => r.tool === "Read");
+  assert.equal(record.by, "code");
+  assert.match(record.reason, /deterministic checks only/, "a fake key was set, so any model call would have failed loudly instead");
+
+  for (const path of [envFile, pem]) {
+    const result = runHook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: path } }, env);
+    assert.equal(result.hookSpecificOutput.permissionDecision, "ask", path);
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /usually holds credentials/);
+  }
+  assert.equal(runHook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: template } }, env), null, "a template is not a credential");
+
+  // Antigravity's view_file maps to Read and gets the same treatment.
+  assert.equal(runAgy(agyCall("view_file", { AbsolutePath: envFile }), env)?.decision, "ask");
+
+  // The model path is still there for anyone who wants it back.
+  before = logCount();
+  runHook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: join(ROOT, "package.json") } }, { JEV_GUARD_READ_MODEL: "1" });
+  record = logRecordsSince(before).find((r) => r.tool === "Read");
+  assert.equal(record.reason, "no api key", "with the switch on and no key, the model path was attempted");
 });
 
 const { latestUserRequest, stripInjectedBlocks } = await import("../lib/transcript.mjs");

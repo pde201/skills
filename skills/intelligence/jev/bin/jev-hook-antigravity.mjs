@@ -175,7 +175,7 @@ async function preToolUse(event) {
     const command = toolCall.args.CommandLine;
     const { wrap, why } = shouldWrap(command);
     if (wrap) {
-      const updated = rewrite(command, task);
+      const updated = rewrite(command, task, { key: event.conversationId || event.session_id });
       logDecision({
         agent: "antigravity",
         hook: "PreToolUse",

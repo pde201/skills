@@ -19,6 +19,7 @@
 
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { systemOne, noul, score, nouls, pickScore, costUsd, haveKey } from "./client.mjs";
+import { looksLikeSecretFile } from "./privacy.mjs";
 import config from "./config.mjs";
 
 export const ALLOW = "allow";
@@ -355,6 +356,20 @@ export async function guard({ toolName, input, cwd, task, recentCalls, observed,
   if (deterministic) return deterministic;
 
   if (!config.guard) return pass("guard disabled");
+
+  // A Read changes nothing, and the read-only gate below would suppress
+  // every hazard but two anyway. The one that lands on read — exposing a
+  // credential — is a fact about the path, so code asks it: a model round
+  // trip on every file the agent looks at bought nothing on real sessions
+  // (26 of 26 allowed) and cost ~300 ms each.
+  if (toolName === "Read" && !config.guardReadsWithModel) {
+    const path = input?.file_path;
+    if (looksLikeSecretFile(path)) {
+      return { decision: ASK, reason: `${path} usually holds credentials. Confirm before it is read.`, by: "code" };
+    }
+    return pass("read-only tool: deterministic checks only");
+  }
+
   if (!haveKey()) return pass("no api key");
 
   const questions = guardQuestions({ toolName, input });

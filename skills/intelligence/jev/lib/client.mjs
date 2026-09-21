@@ -8,7 +8,11 @@
 //  Docs: https://docs.typesafe.ai/api.md
 // ──────────────────────────────────────────────────────────────────────
 
-import { redactState, redactText } from "./privacy.mjs";
+import { readFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { redactState, redactText, writePrivateFile } from "./privacy.mjs";
+import { stateDir } from "./log.mjs";
+import config from "./config.mjs";
 
 export const ENDPOINT = process.env.TYPESAFE_BASE_URL
   ? `${process.env.TYPESAFE_BASE_URL.replace(/\/+$/, "")}/v1/systemone`
@@ -33,6 +37,68 @@ export function apiKey() {
 
 export function haveKey() {
   return Boolean(process.env.TYPESAFE_API_KEY);
+}
+
+// ── Circuit breaker ──────────────────────────────────────────────────
+//
+// Every hook waits on this request. While the provider is down each one
+// waits (retries + 1) × timeout for nothing — a 503 outage on 2026-09-21
+// made every wrapped command and guarded call stall. So after a few
+// consecutive provider failures the layer stops asking for a cooldown and
+// fails open at once, then lets one trial request through when the
+// cooldown has passed. State is a tiny file, because every hook is its
+// own process. Only provider-side failures count: a 4xx or a malformed
+// answer is this layer's bug and comes back fast anyway.
+
+const breakerPath = () => join(stateDir(), "breaker.json");
+const breakerEnabled = () => Number.isFinite(config.breakerFailures) && config.breakerFailures > 0;
+
+function readBreaker() {
+  try {
+    const state = JSON.parse(readFileSync(breakerPath(), "utf8"));
+    return { failures: Number(state.failures) || 0, openedAt: Number(state.openedAt) || 0, last: String(state.last ?? "") };
+  } catch {
+    return { failures: 0, openedAt: 0, last: "" };
+  }
+}
+
+function writeBreaker(state) {
+  try {
+    writePrivateFile(breakerPath(), JSON.stringify(state));
+  } catch {
+    // A breaker that cannot persist simply never opens.
+  }
+}
+
+/** @returns {{open: boolean, failures: number, openedAt: number, last: string, retryInMs: number}} */
+export function breakerStatus(now = Date.now()) {
+  const state = readBreaker();
+  if (!breakerEnabled()) return { open: false, ...state, retryInMs: 0 };
+  const sinceOpened = now - state.openedAt;
+  const open = state.failures >= config.breakerFailures && sinceOpened < config.breakerCooldownMs;
+  return { open, ...state, retryInMs: open ? config.breakerCooldownMs - sinceOpened : 0 };
+}
+
+function recordProviderFailure(message) {
+  if (!breakerEnabled()) return;
+  const state = readBreaker();
+  const failures = state.failures + 1;
+  writeBreaker({
+    failures,
+    // Opening (or re-opening after a failed trial) restarts the cooldown.
+    openedAt: failures >= config.breakerFailures ? Date.now() : state.openedAt,
+    last: redactText(String(message)).slice(0, 200),
+  });
+}
+
+function recordProviderSuccess() {
+  if (!breakerEnabled()) return;
+  if (readBreaker().failures > 0) writeBreaker({ failures: 0, openedAt: 0, last: "" });
+}
+
+/** Forget recorded failures. Tests use it; so can a person after an outage. */
+export function resetBreaker() {
+  try { unlinkSync(breakerPath()); } catch { /* nothing recorded */ }
 }
 
 // ── Question constructors ────────────────────────────────────────────
@@ -75,6 +141,14 @@ export async function systemOne({
   }
 
   const key = apiKey();
+
+  const breaker = breakerStatus();
+  if (breaker.open) {
+    throw new JevUnavailable(
+      `circuit open after ${breaker.failures} consecutive provider failures (last: ${breaker.last || "unknown"}); retrying in ${Math.ceil(breaker.retryInMs / 1000)} s`,
+    );
+  }
+
   let body;
   try {
     // State and question instructions can contain tool input or free text.
@@ -106,7 +180,9 @@ export async function systemOne({
         } catch (err) {
           throw new JevUnavailable("TypeSafe response was not valid JSON", err);
         }
-        return validateResponse(response, questions);
+        const validated = validateResponse(response, questions);
+        recordProviderSuccess();
+        return validated;
       }
 
       // Redact the complete error body before truncating it; slicing first can
@@ -133,6 +209,7 @@ export async function systemOne({
   const why = lastError?.name === "AbortError"
     ? `timed out after ${timeoutMs} ms per attempt`
     : [lastError?.message, lastError?.cause?.code].filter(Boolean).join(" ") || "unknown error";
+  recordProviderFailure(why);
   throw new JevUnavailable(`TypeSafe request failed after ${retries + 1} attempt(s): ${why}`, lastError);
 }
 

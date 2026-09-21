@@ -27,7 +27,7 @@
   },
   "license": "MIT",
   "scripts": {
-    "test": "node --test test/run.mjs test/client-privacy.mjs test/carryforward-regressions.mjs test/operations.mjs",
+    "test": "node --test test/run.mjs test/client-privacy.mjs test/carryforward-regressions.mjs test/operations.mjs test/breaker.mjs",
     "eval:self-test": "node --test evals/self-test.mjs",
     "eval": "node evals/runner.mjs --input evals/traces/offline-benchmark.json",
     "eval:live": "node evals/runner.mjs --mode live --input evals/traces/held-out-sample.json"

@@ -80,6 +80,30 @@ const URL_CREDENTIAL = /([a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:)[^\s/@]+@/gi;
 // over-redaction is accepted because the hooks run against mortgage data.
 const SSN_SHAPED = /\b\d{3}(?:[- ]?\d{2})[- ]?\d{4}\b/g;
 
+// Files that conventionally hold credentials, by path. Used both to ask
+// before one is committed and to ask before one is read.
+const SECRET_FILE_PATTERNS = [
+  /(^|\/)\.env(\.|$)/i,
+  /(^|\/)id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$/i,
+  /\.(pem|key|p12|pfx|jks|keystore)$/i,
+  /(^|\/)credentials(\.json)?$/i,
+  /(^|\/)\.(netrc|pypirc|npmrc|git-credentials)$/i,
+  /(^|\/)\.aws\/credentials$/i,
+  /(^|\/)\.kube\/config$/i,
+  /(^|\/)\.docker\/config\.json$/i,
+  /(^|\/)secrets?\.(json|ya?ml|toml|env|properties)$/i,
+  /(^|\/)secrets?\./i,
+];
+// Templates are meant to be committed and read; only a real .env carries values.
+const SECRET_FILE_EXEMPT = /\.env\.(example|sample|template|dist)$|\.pub$/i;
+
+/** Does this path look like a file that holds credentials? */
+export function looksLikeSecretFile(path) {
+  if (typeof path !== "string" || !path) return false;
+  const normalized = path.replace(/\\/g, "/");
+  return SECRET_FILE_PATTERNS.some((p) => p.test(normalized)) && !SECRET_FILE_EXEMPT.test(normalized);
+}
+
 const normalizedKey = (key) => String(key).replace(/[^a-z0-9]/gi, "").toLowerCase();
 
 /** Return true when an object field name conventionally carries secret data. */

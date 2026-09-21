@@ -35,7 +35,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
-import { shouldWrap, rewrite } from "../lib/wrap.mjs";
+import { shouldWrap, rewrite, dropTask } from "../lib/wrap.mjs";
 import { buildBrief, consumeBrief } from "../lib/carryforward.mjs";
 import {
   checkGoalDriftAndThrashing,
@@ -260,7 +260,7 @@ async function preToolUse(event) {
 
   const hookSpecificOutput = {
     hookEventName: "PreToolUse",
-    updatedInput: writeCommand(input, rewrite(found.command, task), found),
+    updatedInput: writeCommand(input, rewrite(found.command, task, { key: event.session_id }), found),
   };
   if (SLIM_SELF_APPROVES) {
     hookSpecificOutput.permissionDecision = "allow";
@@ -314,6 +314,7 @@ function sessionStart(event) {
 
 async function sessionEnd(event) {
   dropPrompt(event.session_id);
+  dropTask(event.session_id);
   if (config.dodGate && event.transcript_path) {
     try {
       // Codex gives this event three seconds. One attempt, well inside it.

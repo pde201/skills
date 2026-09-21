@@ -30,7 +30,11 @@ storage; use the footer path as authoritative. A consumed compaction brief is
 removed when it was injected whole; one that exceeded the host's context cap
 is kept as `carry-forward-<hash>.full.md` so the bounded injection can point
 at it. Stashed Codex prompts are removed at SessionEnd and persist if that
-event never fires. Text that hosts inject into user turns (system reminders,
+event never fires. The latest user request is also written to a per-session
+`task-<hash>.txt` for the slimmer (so it no longer travels inline in every
+rewritten command); files older than seven days are swept whenever a new one
+is written, and Codex removes its own at SessionEnd. `breaker.json` holds
+only failure counts, a timestamp and a redacted error message. Text that hosts inject into user turns (system reminders,
 hook notifications, terminal relays) is stripped before harvesting and is not
 carried into briefs or task strings. Logs and saved output have no automatic
 retention guarantee; review and delete specific artifacts when no longer

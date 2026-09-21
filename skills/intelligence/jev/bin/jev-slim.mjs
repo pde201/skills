@@ -2,7 +2,7 @@
 // ──────────────────────────────────────────────────────────────────────
 //  jev-slim — run a command and print a slimmer version of its output.
 //
-//    jev-slim exec [--task-b64 B64] -- '<command>'
+//    jev-slim exec [--task-file PATH | --task-b64 B64 | --task TEXT] -- '<command>'
 //    jev-slim filter [--task TEXT] [--cmd TEXT] < output
 //
 //  Usable on its own in any shell or any agent that can wrap a command,
@@ -16,6 +16,7 @@
 // ──────────────────────────────────────────────────────────────────────
 
 import { spawn } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { slim } from "../lib/slim.mjs";
 import config from "../lib/config.mjs";
 import { logDecision } from "../lib/log.mjs";
@@ -37,6 +38,16 @@ function rest() {
 }
 
 const decodeTask = () => {
+  // The hooks write the task to a private file and pass its path; a file
+  // that has since been swept just means the task is unknown.
+  const file = flag("--task-file");
+  if (file) {
+    try {
+      return readFileSync(file, "utf8");
+    } catch {
+      return "";
+    }
+  }
   const b64 = flag("--task-b64");
   if (b64) {
     try {
@@ -127,14 +138,17 @@ async function runFilter() {
 
 const usage = `jev-slim — trim tool output down to what the task needs
 
-  jev-slim exec [--task-b64 B64 | --task TEXT] -- '<command>'
+  jev-slim exec [--task-file PATH | --task-b64 B64 | --task TEXT] -- '<command>'
   jev-slim filter [--task TEXT] [--cmd TEXT] < output
 
 Environment:
   TYPESAFE_API_KEY      required; without it output passes through unchanged
+  JEV_TASK              the task when no --task* flag is given
   JEV_HOOKS=0           disable entirely
   JEV_SLIM_MIN_LINES    output shorter than this is never touched (default 60)
   JEV_TIMEOUT_MS        per-request timeout (default 4000)
+  JEV_BREAKER_FAILURES  consecutive provider failures before judgments are
+                        skipped for JEV_BREAKER_COOLDOWN_MS (default 3 / 60000)
 `;
 
 if (mode === "exec") await runExec();

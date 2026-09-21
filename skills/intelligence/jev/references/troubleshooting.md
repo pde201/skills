@@ -26,8 +26,13 @@ redaction has not altered the request's structure.
 went wrong on the last attempt: `TypeSafe 503` is a provider outage, `fetch
 failed ENOTFOUND` is the network, `timed out after M ms per attempt` is
 latency. All three fail open, and the wrapped command still ran; the cost is
-the wait, up to `(JEV_RETRIES + 1) × JEV_TIMEOUT_MS` per judgment while the
-provider is degraded.
+the wait, up to `(JEV_RETRIES + 1) × JEV_TIMEOUT_MS` per judgment. After
+`JEV_BREAKER_FAILURES` such failures in a row the circuit opens and records
+read `jev unavailable: circuit open after N consecutive provider failures
+(last: …); retrying in S s` — no request is made and nothing waits. One
+trial goes out when `JEV_BREAKER_COOLDOWN_MS` has passed; a success closes
+the circuit, a failure re-opens it. Delete `<JEV_STATE_DIR>/breaker.json` to
+reset it by hand.
 
 ## Recover output
 

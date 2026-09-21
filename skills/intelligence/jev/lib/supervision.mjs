@@ -12,18 +12,8 @@ import { execSync } from "node:child_process";
 import { recentToolCalls, latestUserRequest } from "./transcript.mjs";
 import { systemOne, noul, choice, score, haveKey } from "./client.mjs";
 import { logDecision } from "./log.mjs";
+import { looksLikeSecretFile } from "./privacy.mjs";
 import config from "./config.mjs";
-
-const SENSITIVE_PATTERNS = [
-  /\.env(\.|$)/i,
-  /id_rsa/i,
-  /\.pem$/i,
-  /\.key$/i,
-  /credentials\.json/i,
-  /secrets?\./i,
-];
-// Templates are meant to be committed; only a real .env carries values.
-const SENSITIVE_EXEMPT = /\.env\.(example|sample|template|dist)$/i;
 
 // `--force` and `-f`, but not `--force-with-lease` or `--force-if-includes`,
 // which is the same line lib/guard.mjs draws.
@@ -329,9 +319,7 @@ export function checkGitSafety({ command, cwd } = {}) {
         .filter((line) => /^[MADRC]/.test(line) || (stagesAll && /^.[MD]/.test(line)))
         .map((line) => line.slice(3).trim());
 
-      const sensitiveFiles = stagedFiles.filter((f) =>
-        SENSITIVE_PATTERNS.some((p) => p.test(f)) && !SENSITIVE_EXEMPT.test(f)
-      );
+      const sensitiveFiles = stagedFiles.filter(looksLikeSecretFile);
 
       if (sensitiveFiles.length > 0) {
         return {

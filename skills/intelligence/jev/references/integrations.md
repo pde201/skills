@@ -76,8 +76,9 @@ remote data processing and cost; check the data policy first.
 Hooks read every `JEV_*` variable from the environment the agent hands them.
 Claude Code merges the `env` object from `~/.claude/settings.json` into each
 new session, which makes it the right home for machine-level tuning such as
-`JEV_RETRIES=0` (a plain string value; it is not a secret store, so the key
-does not belong there). Codex and Antigravity have no equivalent that this
+`JEV_RETRIES=0` or a `JEV_WORKSPACE_ROOTS` list of directories that should
+always count as the workspace (plain string values; it is not a secret store,
+so the key does not belong there). Codex and Antigravity have no equivalent that this
 repo can cite: a GUI launch inherits the login session (`launchctl setenv`
 on macOS, republished at login by whatever already publishes the key), a
 terminal launch inherits the shell rc. In every host a running agent keeps

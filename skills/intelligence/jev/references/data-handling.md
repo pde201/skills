@@ -2,8 +2,10 @@
 
 `lib/client.mjs` sends judgments to TypeSafe (`api.typesafe.ai` by default;
 `TYPESAFE_BASE_URL` overrides the endpoint). Guard state includes task, working
-directory, tool input, recent calls, and observed paths. Slimming includes task,
-command, and output blocks. Compaction includes candidate history and current
+directory, workspace roots (the cwd, host workspace folders, directories the
+session has written to, the temp directory, `JEV_WORKSPACE_ROOTS`), tool input,
+recent calls, and observed paths. Slimming includes task, command, and output
+blocks. Compaction includes candidate history and current
 task. These can contain source code, personal data, and business information.
 
 Outbound state and decision logs pass through common-secret/PII redaction:

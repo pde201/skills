@@ -10,7 +10,9 @@ for installation, troubleshooting, data handling, and evaluation.
 ## Architecture
 
 - `bin/jev-hook*.mjs` translates each host's events and verdicts.
-- `lib/guard.mjs` runs deterministic checks before model hazard scoring.
+- `lib/guard.mjs` runs deterministic checks before model hazard scoring, and
+  judges scope against the workspace (cwd, host folders, directories already
+  written to, temp, `JEV_WORKSPACE_ROOTS`) rather than the cwd alone.
 - `lib/wrap.mjs` decides which shell commands are worth routing through the
   slimmer and builds the rewrite; `lib/config.mjs` holds every knob and default.
 - `lib/slim.mjs` preserves full local output and selects ranked blocks only after

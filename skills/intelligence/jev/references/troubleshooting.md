@@ -68,6 +68,19 @@ separate from held-out evaluation; report denominators, uncertainty, model and
 question versions, and repeated-run variation. Five logs can reveal a bug but
 cannot establish a calibrated threshold. Use the eval protocol in `evals/`.
 
+Calibration evidence on record, one machine, 2026-09-21, 57 model asks: 38
+sat between 0.45 and 0.54, and 33 of those were `wrong_scope` on Edit or Write
+calls into a sibling checkout or scratch directory the session was already
+working in. That was the question's wording — it named `cwd` alone — and the
+fix was `workspace_roots`, after which the question is not asked for such
+edits at all. Raising `JEV_GUARD_ASK_AT` to 0.55 would have hidden the same
+asks while also lowering every other hazard, and it was reverted once the
+cause was fixed. Genuine detections in the same log sat well clear of the
+line: `wrong_scope` 0.61 on an edit to the agent's own settings file, and
+`intent_mismatch` 0.91–0.93 on edits that did not serve the stated request.
+The 0.45 default stands on that evidence; a tighter or looser value needs a
+labeled set of its own.
+
 Measure end-to-end latency, including retries and wrapper overhead. The timeout
 is per attempt; it is not a total hook deadline. Record p50/p95, cost, and
 critical-evidence retention rather than only average latency or fewer lines.

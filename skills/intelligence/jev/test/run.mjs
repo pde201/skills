@@ -918,6 +918,53 @@ test("supervision: checkGoalDriftAndThrashing alerts on consecutive failures", a
   assert.match(res.warning, /consecutive tool failures/);
 });
 
+test("supervision: distinct successful edits to one file are not a loop, and identical successes are not either", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-not-thrash-"));
+  const call = (id, name, input) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+  const result = (id, ok, text = "ok") => ({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, is_error: !ok, content: [{ type: "text", text }] }] } });
+  const write = (name, lines) => {
+    const path = join(dir, name);
+    writeFileSync(path, lines.map((l) => JSON.stringify(l)).join("\n"));
+    return path;
+  };
+  const request = { type: "user", message: { role: "user", content: "Tighten the docs." } };
+
+  // Four edits to the same file, each replacing different text — the shape of
+  // ordinary documentation work, which used to read as one call made four times.
+  const distinctEdits = write("edits.jsonl", [request,
+    ...[0, 1, 2, 3].flatMap((i) => [call(`e${i}`, "Edit", { file_path: "/docs/SKILL.md", old_string: `paragraph ${i}`, new_string: `better ${i}` }), result(`e${i}`, true)]),
+  ]);
+  assert.equal((await checkGoalDriftAndThrashing({ transcriptPath: distinctEdits })).warning, null);
+
+  // The very same command, four times, all succeeding: repetition without failure is not thrashing.
+  const sameSuccess = write("same.jsonl", [request,
+    ...[0, 1, 2, 3].flatMap((i) => [call(`s${i}`, "Bash", { command: "git status" }), result(`s${i}`, true)]),
+  ]);
+  assert.equal((await checkGoalDriftAndThrashing({ transcriptPath: sameSuccess })).warning, null);
+
+  // The same failing edit three times is still a loop.
+  const sameFailing = write("failing.jsonl", [request,
+    ...[0, 1, 2].flatMap((i) => [call(`f${i}`, "Edit", { file_path: "/docs/SKILL.md", old_string: "gone", new_string: "x" }), result(`f${i}`, false, "old_string not found")]),
+  ]);
+  assert.match((await checkGoalDriftAndThrashing({ transcriptPath: sameFailing })).warning, /consecutive tool failures/);
+});
+
+test("recentToolCalls carries an edit's replaced text and a write's size as detail", async () => {
+  const { recentToolCalls } = await import("../lib/transcript.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "jev-detail-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, [
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "e", name: "Edit", input: { file_path: "/a.ts", old_string: "const  x =\n 1", new_string: "y" } }] } },
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "w", name: "Write", input: { file_path: "/b.ts", content: "hello" } }] } },
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "b", name: "Bash", input: { command: "ls" } }] } },
+  ].map((l) => JSON.stringify(l)).join("\n"));
+  const [edit, write, bash] = recentToolCalls(path);
+  assert.equal(edit.input, "/a.ts", "the path summary is unchanged for callers that read it as a path");
+  assert.equal(edit.detail, "replaces: const x = 1");
+  assert.equal(write.detail, "writes 5 chars");
+  assert.equal(bash.detail, undefined);
+});
+
 test("supervision: triageToolError categorizes common failures deterministically", async () => {
   const syntax = await triageToolError({ toolName: "run_command", error: "SyntaxError: Unexpected token {" });
   assert.equal(syntax.category, "syntax_compile");

@@ -105,7 +105,7 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
     if (Array.isArray(content)) {
       for (const part of content) {
         if (part?.type === "tool_use") {
-          calls.push({ tool: part.name, input: summarizeInput(part.input), failed: false, id: part.id });
+          calls.push({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), failed: false, id: part.id });
         } else if (part?.type === "tool_result") {
           const call = calls.find((c) => c.id === part.tool_use_id);
           if (call) {
@@ -121,7 +121,8 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
       for (const call of entry.tool_calls) {
         const id = call.id ?? String(entry.step_index ?? Math.random());
         const failed = Boolean(entry?.status === "ERROR" || call?.status === "ERROR" || call?.is_error || entry?.is_error);
-        calls.push({ tool: call.name, input: summarizeInput(call.args ?? call.input), failed, id });
+        const args = call.args ?? call.input;
+        calls.push({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), failed, id });
       }
     } else if (entry?.source === "MODEL" && entry?.type === "GENERIC" && calls.length > 0) {
       const lastCall = calls[calls.length - 1];
@@ -132,6 +133,22 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
     }
   }
   return calls.slice(-limit).map(({ id, ...rest }) => rest);
+}
+
+/**
+ * What distinguishes one call on a target from another on the same target:
+ * the text an edit replaces, or the size of the content a write lands. The
+ * `input` summary stays the path so callers that read it as one keep
+ * working; this rides alongside so four different edits to one file do not
+ * look like the same call made four times.
+ */
+function summarizeDetail(input) {
+  if (!input || typeof input !== "object") return undefined;
+  const replaced = input.old_string ?? input.TargetContent;
+  if (typeof replaced === "string") return `replaces: ${replaced.replace(/\s+/g, " ").trim().slice(0, 60)}`;
+  const written = input.content ?? input.CodeContent;
+  if (typeof written === "string") return `writes ${written.length} chars`;
+  return undefined;
 }
 
 function summarizeInput(input) {

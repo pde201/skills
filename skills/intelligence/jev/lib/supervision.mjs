@@ -58,13 +58,20 @@ export async function checkGoalDriftAndThrashing({ transcriptPath, latestRequest
   const task = latestRequest || latestUserRequest(transcriptPath);
   if (!task) return { warning: null };
 
-  // Look for repeated errors or identical tool invocations
+  // Look for repeated errors or identical tool invocations. A call is the
+  // same call only when its target and its detail match: four edits to one
+  // file that replace different text are four different calls. And a run
+  // of identical calls that all succeeded is not a loop — thrashing means
+  // repeating what failed — so duplicates only count once something has.
   const failedCalls = calls.filter((c) => c.failed);
   const consecutiveFailures = calls.slice(-3).filter((c) => c.failed).length;
-  const recentInputs = calls.slice(-4).map((c) => `${c.tool}:${c.input}`);
+  const recentInputs = calls.slice(-4).map((c) => `${c.tool}:${c.input}:${c.detail ?? ""}`);
   const duplicateInputs = recentInputs.length - new Set(recentInputs).size;
 
-  const showsSignsOfLooping = consecutiveFailures >= 2 || duplicateInputs >= 2 || failedCalls.length >= 4;
+  const showsSignsOfLooping =
+    consecutiveFailures >= 2 ||
+    (duplicateInputs >= 2 && failedCalls.length >= 1) ||
+    failedCalls.length >= 4;
   if (!showsSignsOfLooping) return { warning: null };
 
   if (haveKey()) {
@@ -74,7 +81,7 @@ export async function checkGoalDriftAndThrashing({ transcriptPath, latestRequest
         timeoutMs: 2500,
         state: {
           user_request: task.slice(0, 1000),
-          recent_calls: calls.map((c) => `${c.tool}(${c.input.slice(0, 120)}) => ${c.failed ? "FAILED: " + (c.result || "") : "OK"}`).join("\n"),
+          recent_calls: calls.map((c) => `${c.tool}(${c.input.slice(0, 120)}${c.detail ? ` · ${c.detail}` : ""}) => ${c.failed ? "FAILED: " + (c.result || "") : "OK"}`).join("\n"),
         },
         questions: {
           thrashing: noul("Has the agent attempted essentially the same failed action or debugging loop repeatedly without making tangible progress?"),

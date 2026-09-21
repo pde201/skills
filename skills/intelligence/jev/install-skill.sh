@@ -14,7 +14,7 @@ usage() {
 Install the jev skill.
 
 Usage:
-  ./install-skill.sh [codex|claude] [--force]
+  ./install-skill.sh [codex|claude|antigravity] [--force]
   ./install-skill.sh --dest /path/to/skills-dir [--force]
 
 Targets:

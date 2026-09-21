@@ -2,22 +2,41 @@
 
 This directory contains a small, dependency-free evaluator for Jev behavior. It consumes JSON traces and produces a text or JSON report. It never invokes a model CLI, Jev's provider, an installer, a shell command, or a network request.
 
-The public dataset is [cases.json](./cases.json). Cases cover skill selection, installer safety, explicit approval, missing-key behavior, calibration discipline, saved-output recovery, and the sensitive-data boundary. A result can pass only when the trace has structured events, structured results, and evidence entries that reference the event IDs used by the assertions. The grader uses exact JSON field matching; it does not search prose with regular expressions.
+The public dataset is [cases.json](./cases.json). It defines 22 structured behavioral cases covering:
+- **Skill Selection & Guarding**: Accurate triggering on tool bloat and errors; non-selection on unrelated prose tasks.
+- **Installer Safety**: Check-only non-mutation and explicit user approval boundaries across Claude, Codex, and Antigravity.
+- **Fail-Open Boundaries**: Graceful local degradation on missing API key with continuous deterministic checks.
+- **Sensitive Data Isolation**: Credential protection and strict redaction boundaries.
+- **Agent Supervision**: Git pre-commit and force-push protection, intelligent error triage, and Definition of Done verification quality gates.
+- **Thrashing & Looping**: Detection of consecutive failure loops and injection of guidance.
+- **Output Slimming**: Invariant preservation of non-zero exit codes, line budgets, and anchor lines.
+- **Compaction Carry-Forward**: Preserving user constraints and single-use brief injection.
+
+A result can pass only when the trace has structured events, structured results, and evidence entries that reference the event IDs used by the assertions. The grader uses exact JSON field matching; it does not search prose with regular expressions.
 
 ## Commands
 
 Run from the Jev skill directory:
 
 ```bash
+# Inspection & self-test
 node evals/runner.mjs --help
 node evals/runner.mjs --list
 node evals/runner.mjs --protocol
-node --test evals/self-test.mjs
+npm run eval:self-test
+
+# Run full 22-case offline benchmark
+npm run eval
+node evals/runner.mjs --input evals/traces/offline-benchmark.json --format text
+
+# Run held-out live trace evaluation
+npm run eval:live
+node evals/runner.mjs --mode live --input evals/traces/held-out-sample.json --format text
 ```
 
-`self-test.mjs` uses fabricated safe and unsafe traces. Its green result is a harness test only; it is not an agent behavioral result and is not a live measurement.
+`self-test.mjs` verifies the harness against fabricated safe/unsafe traces, runs the 22-case offline benchmark, and verifies live metric scoring.
 
-To score an offline run, save a JSON document with a `traces` array and run:
+To score a custom offline run, save a JSON document with a `traces` array and run:
 
 ```bash
 node evals/runner.mjs --input /path/to/offline-traces.json --format text

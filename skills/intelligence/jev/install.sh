@@ -96,6 +96,7 @@ case "${1:-install}" in
     jq "$DEJEV"'
       .hooks //= {}
       | .hooks.PreToolUse   = ((.hooks.PreToolUse   // []) | dejev)
+      | .hooks.PostToolUse  = ((.hooks.PostToolUse  // []) | dejev)
       | .hooks.PreCompact   = ((.hooks.PreCompact   // []) | dejev)
       | .hooks.SessionStart = ((.hooks.SessionStart // []) | dejev)
       | .hooks |= with_entries(select(.value | length > 0))
@@ -123,10 +124,14 @@ jq --arg cmd "$HOOK_CMD" "$DEJEV"'
 
   .hooks //= {}
 
-  # Guards the call and rewrites bloated commands. Scoped by matcher so it
+  # Guards the call, checks git safety, and rewrites bloated commands. Scoped by matcher so it
   # never spawns for tools it has nothing to say about.
   | .hooks.PreToolUse =
       ((.hooks.PreToolUse // []) | dejev) + [ entry("Bash|Edit|Write|NotebookEdit|Read"; 15) ]
+
+  # Triages errors from failing tools.
+  | .hooks.PostToolUse =
+      ((.hooks.PostToolUse // []) | dejev) + [ entry("Bash|Edit|Write|NotebookEdit|Read"; 10) ]
 
   # Works out what must survive compaction, and writes it to disk.
   | .hooks.PreCompact =
@@ -139,7 +144,7 @@ jq --arg cmd "$HOOK_CMD" "$DEJEV"'
 
 jq empty "$tmp" || { warn "refusing to write invalid JSON; settings untouched"; rm -f "$tmp"; exit 1; }
 mv "$tmp" "$SETTINGS"
-ok "PreToolUse, PreCompact and SessionStart registered"
+ok "PreToolUse, PostToolUse, PreCompact and SessionStart registered"
 
 mkdir -p "$BIN_DIR"
 ln -sfn "$JEV_DIR/bin/jev-slim.mjs" "$BIN_DIR/jev-slim"

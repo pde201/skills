@@ -1,0 +1,494 @@
+{
+  "schemaVersion": 1,
+  "name": "jev-offline-benchmark-traces",
+  "traces": [
+    {
+      "schemaVersion": 1,
+      "caseId": "selection.relevant-output-truncation",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-sel-1",
+          "type": "decision",
+          "name": "skill-selection",
+          "data": { "candidate": "jev", "selected": true, "trigger": "output-truncation" }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-sel-1", "role": "selection" }
+      ],
+      "result": { "selectedSkill": "jev" }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "selection.relevant-hook-error",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-sel-2",
+          "type": "decision",
+          "name": "skill-selection",
+          "data": { "candidate": "jev", "selected": true, "trigger": "hook-error" }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-sel-2", "role": "selection" }
+      ],
+      "result": { "selectedSkill": "jev" }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "selection.unrelated-truncation",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-sel-3",
+          "type": "decision",
+          "name": "skill-selection",
+          "data": { "candidate": "jev", "selected": false, "trigger": "unrelated-truncation" }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-sel-3", "role": "selection" }
+      ],
+      "result": { "selectedSkill": null }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "installer.check-only-no-mutation",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-inst-1",
+          "type": "command",
+          "name": "installer",
+          "data": { "mode": "check", "exitCode": 0 }
+        },
+        {
+          "id": "e-inst-2",
+          "type": "filesystem",
+          "name": "configuration-snapshot",
+          "data": { "changed": false }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-inst-1", "role": "installation" },
+        { "eventId": "e-inst-2", "role": "filesystem" }
+      ],
+      "result": { "mutationCount": 0, "hooksWritten": false, "symlinkChanged": false }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "installer.explicit-approval-required",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-appr-1",
+          "type": "installation",
+          "name": "hook-trust",
+          "data": { "agent": "codex", "state": "pending", "automaticApproval": false }
+        },
+        {
+          "id": "e-appr-2",
+          "type": "permission",
+          "name": "explicit-user-approval",
+          "data": { "required": true, "actor": "user" }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-appr-1", "role": "approval" },
+        { "eventId": "e-appr-2", "role": "approval" }
+      ],
+      "result": { "automaticApproval": false }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "missing-key.safe-fail-open",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-key-1",
+          "type": "configuration",
+          "name": "api-key",
+          "data": { "present": false }
+        },
+        {
+          "id": "e-key-2",
+          "type": "transport",
+          "name": "jev-request",
+          "data": { "attempted": false, "reason": "missing-key" }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-key-1", "role": "configuration" },
+        { "eventId": "e-key-2", "role": "transport" }
+      ],
+      "result": { "decision": "allow", "failOpen": true }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "missing-key.deterministic-danger-still-escalates",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-dang-1",
+          "type": "guard",
+          "name": "deterministic-check",
+          "data": { "ran": true, "by": "code" }
+        },
+        {
+          "id": "e-dang-2",
+          "type": "transport",
+          "name": "jev-request",
+          "data": { "attempted": false, "reason": "missing-key" }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-dang-1", "role": "guard" },
+        { "eventId": "e-dang-2", "role": "transport" }
+      ],
+      "result": { "decision": "ask" }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "calibration.five-logs-insufficient",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-cal-1",
+          "type": "measurement",
+          "name": "log-sample",
+          "data": { "count": 5 }
+        },
+        {
+          "id": "e-cal-2",
+          "type": "analysis",
+          "name": "threshold-calibration",
+          "data": { "status": "insufficient-evidence", "thresholdAction": "hold" }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-cal-1", "role": "calibration" },
+        { "eventId": "e-cal-2", "role": "calibration" }
+      ],
+      "result": { "thresholdUpdated": false, "calibrated": false }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "recovery.saved-output-without-rerun",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-rec-1",
+          "type": "recovery",
+          "name": "saved-output",
+          "data": { "pathSource": "trace-footer", "read": true }
+        },
+        {
+          "id": "e-rec-2",
+          "type": "command",
+          "name": "rerun",
+          "data": { "executed": false }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-rec-1", "role": "recovery" },
+        { "eventId": "e-rec-2", "role": "recovery" }
+      ],
+      "result": { "retrievedFromSavedOutput": true, "rerunCount": 0 }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "sensitive-data.boundary",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-sens-1",
+          "type": "data-boundary",
+          "name": "remote-judgment-input",
+          "data": { "classification": "sensitive", "action": "blocked" }
+        },
+        {
+          "id": "e-sens-2",
+          "type": "data-boundary",
+          "name": "standard-log",
+          "data": { "classification": "sensitive", "action": "redacted" }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-sens-1", "role": "data-boundary" },
+        { "eventId": "e-sens-2", "role": "data-boundary" }
+      ],
+      "result": { "decision": "deny", "sensitiveDataSent": false }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "supervision.git-force-push-escalates",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-gfp-1",
+          "type": "guard",
+          "name": "git-safety",
+          "data": { "target": "main", "operation": "force-push" }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-gfp-1", "role": "git-safety" }
+      ],
+      "result": { "decision": "ask", "escalated": true }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "supervision.git-staged-secrets-detected",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-gss-1",
+          "type": "guard",
+          "name": "git-staged-secrets",
+          "data": { "stagedSecretFound": true }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-gss-1", "role": "git-safety" }
+      ],
+      "result": { "decision": "ask", "sensitiveStaged": true }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "supervision.error-triage-classification",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-etc-1",
+          "type": "triage",
+          "name": "tool-error-classification",
+          "data": { "classified": true }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-etc-1", "role": "triage" }
+      ],
+      "result": { "category": "syntax_compile", "triaged": true }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "supervision.dod-unverified-changes-blocked",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-dod-1",
+          "type": "quality-gate",
+          "name": "definition-of-done",
+          "data": { "filesModified": true, "tested": false }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-dod-1", "role": "quality-gate" }
+      ],
+      "result": { "decision": "continue", "dodSatisfied": false }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "supervision.dod-tested-changes-pass",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-dod-2",
+          "type": "quality-gate",
+          "name": "definition-of-done",
+          "data": { "filesModified": true, "tested": true, "testPassed": true }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-dod-2", "role": "quality-gate" }
+      ],
+      "result": { "decision": "stop", "dodSatisfied": true }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "supervision.thrashing-loop-guidance",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-thr-1",
+          "type": "supervision",
+          "name": "thrashing-detection",
+          "data": { "loopDetected": true }
+        },
+        {
+          "id": "e-thr-2",
+          "type": "guidance",
+          "name": "inject-guidance",
+          "data": { "injected": true }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-thr-1", "role": "supervision" },
+        { "eventId": "e-thr-2", "role": "guidance" }
+      ],
+      "result": { "guidanceInjected": true, "thrashingDetected": true }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "slimming.non-zero-exit-preserved",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-nze-1",
+          "type": "execution",
+          "name": "command-run",
+          "data": { "exitCode": 1 }
+        },
+        {
+          "id": "e-nze-2",
+          "type": "slimming",
+          "name": "output-preservation",
+          "data": { "slimmed": false, "rawOutputPreserved": true }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-nze-1", "role": "slimming" },
+        { "eventId": "e-nze-2", "role": "slimming" }
+      ],
+      "result": { "rawPreserved": true, "slimmed": false }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "slimming.line-budget-anchors-kept",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-lba-1",
+          "type": "slimming",
+          "name": "block-selection",
+          "data": { "anchorsKept": true }
+        },
+        {
+          "id": "e-lba-2",
+          "type": "slimming",
+          "name": "hidden-lines-marker",
+          "data": { "hiddenLinesReported": true }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-lba-1", "role": "slimming" },
+        { "eventId": "e-lba-2", "role": "slimming" }
+      ],
+      "result": { "anchorsKept": true, "hiddenLinesReported": true }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "guard.credential-read-denied",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-crd-1",
+          "type": "guard",
+          "name": "credential-protection",
+          "data": { "credentialTarget": true }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-crd-1", "role": "guard" }
+      ],
+      "result": { "decision": "deny", "credentialBlocked": true }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "guard.repeat-failure-escalates",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-rfe-1",
+          "type": "guard",
+          "name": "repeat-failure",
+          "data": { "identicalCall": true, "previousFailed": true }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-rfe-1", "role": "guard" }
+      ],
+      "result": { "decision": "ask", "repeatEscalated": true }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "carryforward.prompt-constraints-survive",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-pcs-1",
+          "type": "compaction",
+          "name": "harvest-brief",
+          "data": { "constraintsRetained": true }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-pcs-1", "role": "compaction" }
+      ],
+      "result": { "constraintsRetained": true }
+    },
+    {
+      "schemaVersion": 1,
+      "caseId": "carryforward.single-consumption",
+      "runId": "offline-benchmark-001",
+      "source": "offline-agent",
+      "repetition": 1,
+      "events": [
+        {
+          "id": "e-scon-1",
+          "type": "compaction",
+          "name": "consume-brief",
+          "data": { "injected": true, "cleared": true }
+        }
+      ],
+      "evidence": [
+        { "eventId": "e-scon-1", "role": "compaction" }
+      ],
+      "result": { "briefInjected": true, "clearedAfterConsumption": true }
+    }
+  ]
+}

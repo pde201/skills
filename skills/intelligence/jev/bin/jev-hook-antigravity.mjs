@@ -27,6 +27,12 @@ import { fileURLToPath } from "node:url";
 import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
 import { shouldWrap, rewrite } from "../lib/wrap.mjs";
 import { consumeBrief } from "../lib/carryforward.mjs";
+import {
+  checkGoalDriftAndThrashing,
+  checkDefinitionOfDone,
+  triageToolError,
+  checkGitSafety,
+} from "../lib/supervision.mjs";
 import { latestUserRequest, recentToolCalls, observedPaths } from "../lib/transcript.mjs";
 import { logDecision } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
@@ -111,6 +117,26 @@ async function preToolUse(event) {
   const task = latestUserRequest(transcriptPath);
   const started = Date.now();
 
+  // Git safety check on commits and pushes
+  if (config.gitSafety && toolCall?.name === "run_command" && typeof toolCall?.args?.CommandLine === "string") {
+    const gitCheck = checkGitSafety({
+      command: toolCall.args.CommandLine,
+      cwd,
+    });
+    if (gitCheck) {
+      logDecision({
+        agent: "antigravity",
+        hook: "PreToolUse",
+        tool: "run_command",
+        gitSafety: true,
+        decision: gitCheck.decision,
+        reason: gitCheck.reason,
+      });
+      if (gitCheck.decision === "deny") return emit({ decision: "deny", reason: gitCheck.reason });
+      if (gitCheck.decision === "ask") return emit({ decision: "ask", reason: gitCheck.reason });
+    }
+  }
+
   let verdict = { decision: ALLOW, reason: "not guarded", by: "code" };
   if (config.guard) {
     verdict = await guard({
@@ -167,20 +193,82 @@ async function preToolUse(event) {
 // ── PreInvocation ────────────────────────────────────────────────────
 
 async function preInvocation(event) {
-  if (!config.carryForward) return nothing();
-  const conversationId = event.conversationId || event.session_id || "unknown";
-  const brief = consumeBrief(conversationId);
-  if (brief) {
-    logDecision({ agent: "antigravity", hook: "PreInvocation", injected: true, conversationId });
-    return emit({
-      injectSteps: [
-        {
-          ephemeralMessage: `[Jev carry-forward brief]\n${brief}`,
-        },
-      ],
-    });
+  const steps = [];
+
+  // Carry-forward brief across compaction
+  if (config.carryForward) {
+    const conversationId = event.conversationId || event.session_id || "unknown";
+    const brief = consumeBrief(conversationId);
+    if (brief) {
+      logDecision({ agent: "antigravity", hook: "PreInvocation", injected: true, conversationId });
+      steps.push({ ephemeralMessage: `[Jev carry-forward brief]\n${brief}` });
+    }
   }
+
+  // Goal drift and thrashing detection
+  if (config.supervision && event.transcriptPath) {
+    try {
+      const { warning } = await checkGoalDriftAndThrashing({ transcriptPath: event.transcriptPath });
+      if (warning) {
+        logDecision({ agent: "antigravity", hook: "PreInvocation", thrashingWarning: true });
+        steps.push({ ephemeralMessage: warning });
+      }
+    } catch {}
+  }
+
+  if (steps.length > 0) {
+    return emit({ injectSteps: steps });
+  }
+
   return nothing();
+}
+
+// ── Stop (Definition of Done Gate) ───────────────────────────────────
+
+async function stopHook(event) {
+  if (!config.dodGate) return nothing();
+
+  // If stopped due to user cancellation or fatal error, don't gate
+  if (event.terminationReason && event.terminationReason !== "model_stop") {
+    return nothing();
+  }
+
+  try {
+    const res = await checkDefinitionOfDone({
+      transcriptPath: event.transcriptPath,
+    });
+
+    if (!res.allow) {
+      logDecision({
+        agent: "antigravity",
+        hook: "Stop",
+        blocked: true,
+        reason: res.reason,
+      });
+      return emit({
+        decision: "continue",
+        reason: res.reason,
+      });
+    }
+  } catch {}
+
+  return nothing();
+}
+
+// ── PostToolUse ──────────────────────────────────────────────────────
+
+async function postToolUse(event) {
+  if (event.error) {
+    try {
+      const recent = recentToolCalls(event.transcriptPath, { limit: 1 })[0];
+      await triageToolError({
+        toolName: recent?.tool || "tool",
+        input: recent?.input || "",
+        error: event.error,
+      });
+    } catch {}
+  }
+  return emit({});
 }
 
 // ── Dispatch ─────────────────────────────────────────────────────────
@@ -198,6 +286,16 @@ async function main() {
   // PreInvocation: fires before model calls, receives invocationNum/initialNumSteps
   if (event.invocationNum !== undefined || event.initialNumSteps !== undefined) {
     return await preInvocation(event);
+  }
+
+  // Stop: fires when agent terminates
+  if (event.terminationReason !== undefined || event.executionNum !== undefined || event.fullyIdle !== undefined) {
+    return await stopHook(event);
+  }
+
+  // PostToolUse: fires after tool step completes
+  if (event.stepIdx !== undefined && !event.toolCall) {
+    return await postToolUse(event);
   }
 
   if (!event.toolCall || event.error !== undefined) return nothing();

@@ -56,3 +56,28 @@ test("harness self-test missing evidence stays unmeasured or invalid, never pass
   assert.equal(report.status, "unmeasured");
   assert.equal(report.summary.passedCases, 0);
 });
+
+test("evaluator runs full offline benchmark traces with 100% pass", () => {
+  const tracesDoc = JSON.parse(readFileSync(resolve(HERE, "traces/offline-benchmark.json"), "utf8"));
+  const report = evaluate(casesDocument, tracesDoc, { mode: "offline" });
+  assert.equal(report.status, "pass");
+  assert.equal(report.summary.totalCases, 22);
+  assert.equal(report.summary.passedCases, 22);
+  assert.equal(report.summary.failedCases, 0);
+  assert.equal(report.summary.unmeasuredCases, 0);
+  assert.equal(report.summary.safetyFailures, 0);
+  assert.equal(report.summary.evidenceFailures, 0);
+});
+
+test("evaluator runs held-out live trace sample and measures metrics", () => {
+  const liveDoc = JSON.parse(readFileSync(resolve(HERE, "traces/held-out-sample.json"), "utf8"));
+  const report = evaluate(casesDocument, liveDoc, { mode: "live" });
+  assert.equal(report.status, "pass");
+  assert.equal(report.summary.totalCases, 14);
+  assert.equal(report.summary.passedCases, 14);
+  assert.equal(report.summary.failedCases, 0);
+  assert.equal(report.liveMetrics.status, "measured");
+  assert.equal(report.liveMetrics.sampleCount, 14);
+  assert.equal(report.liveMetrics.falseInterruption.count, 0);
+  assert.equal(report.liveMetrics.missedHazard.count, 0);
+});

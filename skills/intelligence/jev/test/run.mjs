@@ -381,6 +381,27 @@ test("malformed input does not break the hook", () => {
   assert.equal(out.trim(), "");
 });
 
+test("claude: PreToolUse asks on force push to main", () => {
+  const result = runHook({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "git push --force origin main" },
+    cwd: process.cwd(),
+  });
+  assert.equal(result.hookSpecificOutput.permissionDecision, "ask");
+  assert.match(result.hookSpecificOutput.permissionDecisionReason, /force push/i);
+});
+
+test("claude: PostToolUse triages error without failing", () => {
+  const result = runHook({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "npm test" },
+    error: "exit status 1",
+  });
+  assert.equal(result, null);
+});
+
 test("an unknown event is ignored", () => {
   assert.equal(runHook({ hook_event_name: "SomethingNew" }), null);
 });
@@ -603,6 +624,43 @@ test("codex: malformed input does not break the hook", () => {
   assert.equal(out.trim(), "");
 });
 
+test("codex: PreToolUse asks on force push to main", () => {
+  const result = runCodex({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "git push --force origin main" },
+    cwd: process.cwd(),
+  });
+  assert.equal(result.hookSpecificOutput.permissionDecision, "ask");
+  assert.match(result.hookSpecificOutput.permissionDecisionReason, /force push/i);
+});
+
+test("codex: PostToolUse triages error without failing", () => {
+  const result = runCodex({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "npm test" },
+    error: "exit status 1",
+  });
+  assert.equal(result, null);
+});
+
+test("codex: SessionEnd evaluates DoD and cleans up without failing", () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "codex-dod-"));
+  const transcriptPath = join(tmpDir, "edited.jsonl");
+  writeFileSync(transcriptPath, JSON.stringify({
+    source: "MODEL",
+    type: "GENERIC",
+    tool_calls: [{ name: "apply_patch", args: {} }],
+  }) + "\n");
+  const result = runCodex({
+    hook_event_name: "SessionEnd",
+    session_id: "codex-session-dod",
+    transcript_path: transcriptPath,
+  });
+  assert.equal(result, null);
+});
+
 // ── the Antigravity adapter ──────────────────────────────────────────
 //
 // Antigravity's decision vocabulary is its own, and its allow path has no
@@ -690,6 +748,120 @@ test("antigravity: an explicit allow is emitted only when it is asked for by nam
 test("antigravity: malformed input does not break the hook", () => {
   const out = execFileSync("node", [AGY_HOOK], { input: "not json at all" }).toString();
   assert.equal(out.trim(), "");
+});
+
+// ── Antigravity supervision & advanced hooks ──────────────────────────
+
+const {
+  checkGoalDriftAndThrashing,
+  checkDefinitionOfDone,
+  triageToolError,
+  checkGitSafety,
+} = await import("../lib/supervision.mjs");
+
+test("supervision: checkGitSafety asks on force push to main", () => {
+  const result = checkGitSafety({ command: "git push --force origin main" });
+  assert.equal(result?.decision, "ask");
+  assert.match(result?.reason, /force push/i);
+  assert.equal(checkGitSafety({ command: "git status" }), null);
+});
+
+test("supervision: checkGoalDriftAndThrashing alerts on consecutive failures", async () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "jev-thrash-"));
+  const transcript = join(tmpDir, "thrash.jsonl");
+  writeFileSync(transcript, [
+    JSON.stringify({ source: "USER_EXPLICIT", type: "USER_INPUT", content: "<USER_REQUEST>Fix the broken tests</USER_REQUEST>" }),
+    JSON.stringify({ source: "MODEL", type: "GENERIC", tool_calls: [{ name: "run_command", args: { CommandLine: "npm test" } }], status: "ERROR" }),
+    JSON.stringify({ source: "MODEL", type: "GENERIC", tool_calls: [{ name: "run_command", args: { CommandLine: "npm test" } }], status: "ERROR" }),
+    JSON.stringify({ source: "MODEL", type: "GENERIC", tool_calls: [{ name: "run_command", args: { CommandLine: "npm test" } }], status: "ERROR" }),
+  ].join("\n") + "\n");
+
+  const res = await checkGoalDriftAndThrashing({ transcriptPath: transcript });
+  assert.ok(res.warning);
+  assert.match(res.warning, /consecutive tool failures/);
+});
+
+test("supervision: triageToolError categorizes common failures deterministically", async () => {
+  const syntax = await triageToolError({ toolName: "run_command", error: "SyntaxError: Unexpected token {" });
+  assert.equal(syntax.category, "syntax_compile");
+
+  const assertion = await triageToolError({ toolName: "run_command", error: "AssertionError: expected true to be false" });
+  assert.equal(assertion.category, "test_assertion");
+
+  const missing = await triageToolError({ toolName: "run_command", error: "sh: vitest: command not found" });
+  assert.equal(missing.category, "missing_dependency");
+});
+
+test("supervision: checkDefinitionOfDone permits unedited sessions and flags unverified edits", async () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "jev-dod-"));
+  const cleanTranscript = join(tmpDir, "clean.jsonl");
+  writeFileSync(cleanTranscript, JSON.stringify({
+    source: "MODEL",
+    type: "GENERIC",
+    tool_calls: [{ name: "view_file", args: { AbsolutePath: "/a/b.ts" } }],
+  }) + "\n");
+
+  const cleanRes = await checkDefinitionOfDone({ transcriptPath: cleanTranscript });
+  assert.equal(cleanRes.allow, true);
+
+  const editedNoTest = join(tmpDir, "edited-notest.jsonl");
+  writeFileSync(editedNoTest, JSON.stringify({
+    source: "MODEL",
+    type: "GENERIC",
+    tool_calls: [{ name: "replace_file_content", args: { TargetFile: "/a/b.ts" } }],
+  }) + "\n");
+
+  const blockedRes = await checkDefinitionOfDone({ transcriptPath: editedNoTest });
+  assert.equal(blockedRes.allow, false);
+  assert.match(blockedRes.reason, /no test commands were run afterwards/);
+
+  const editedWithTest = join(tmpDir, "edited-tested.jsonl");
+  writeFileSync(editedWithTest, [
+    JSON.stringify({
+      source: "MODEL",
+      type: "GENERIC",
+      tool_calls: [{ name: "replace_file_content", args: { TargetFile: "/a/b.ts" } }],
+    }),
+    JSON.stringify({
+      source: "MODEL",
+      type: "GENERIC",
+      tool_calls: [{ name: "run_command", args: { CommandLine: "npm test" } }],
+    }),
+  ].join("\n") + "\n");
+
+  const testedRes = await checkDefinitionOfDone({ transcriptPath: editedWithTest });
+  assert.equal(testedRes.allow, true);
+});
+
+test("antigravity: Stop hook blocks completion when changes lack verification", () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "agy-stop-"));
+  const transcriptPath = join(tmpDir, "edited.jsonl");
+  writeFileSync(transcriptPath, JSON.stringify({
+    source: "MODEL",
+    type: "GENERIC",
+    tool_calls: [{ name: "write_to_file", args: { TargetFile: "/a/b.ts" } }],
+  }) + "\n");
+
+  // model_stop with unverified changes continues execution
+  const stopEvent = {
+    executionNum: 1,
+    terminationReason: "model_stop",
+    transcriptPath,
+  };
+  const blocked = runAgy(stopEvent);
+  assert.equal(blocked?.decision, "continue");
+  assert.match(blocked?.reason, /Jev Verification Gate/);
+
+  // error stop does not block
+  assert.equal(runAgy({ ...stopEvent, terminationReason: "error" }), null);
+
+  // disabled DoD knob does not block
+  assert.equal(runAgy(stopEvent, { JEV_DOD_GATE: "0" }), null);
+});
+
+test("antigravity: PostToolUse responds with empty object", () => {
+  const postEvent = { stepIdx: 4, error: "exit status 1" };
+  assert.deepEqual(runAgy(postEvent), {});
 });
 
 // ── the translations, directly ───────────────────────────────────────

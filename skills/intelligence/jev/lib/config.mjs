@@ -31,6 +31,10 @@ export const config = {
   slim: bool("JEV_HOOKS_SLIM", true),
   guard: bool("JEV_HOOKS_GUARD", true),
   carryForward: bool("JEV_HOOKS_CARRY_FORWARD", true),
+  supervision: bool("JEV_HOOKS_SUPERVISION", true),
+  dodGate: bool("JEV_DOD_GATE", true),
+  gitSafety: bool("JEV_GIT_SAFETY", true),
+  thrashingThreshold: num("JEV_THRASHING_THRESHOLD", 0.75),
 
   // Hooks sit in the critical path of every tool call. A judgment that has
   // not returned in this long is worth less than the latency it costs.

@@ -14,6 +14,11 @@
 import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
 import { shouldWrap, rewrite } from "../lib/wrap.mjs";
 import { buildBrief, consumeBrief } from "../lib/carryforward.mjs";
+import {
+  checkGoalDriftAndThrashing,
+  triageToolError,
+  checkGitSafety,
+} from "../lib/supervision.mjs";
 import { latestUserRequest, recentToolCalls, observedPaths } from "../lib/transcript.mjs";
 import { logDecision } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
@@ -40,6 +45,23 @@ async function preToolUse(event) {
   const { tool_name: toolName, tool_input: input, cwd, transcript_path: transcriptPath } = event;
   const task = latestUserRequest(transcriptPath);
   const started = Date.now();
+
+  // Git safety check on commits and pushes
+  if (config.gitSafety && toolName === "Bash" && typeof input?.command === "string") {
+    const gitCheck = checkGitSafety({ command: input.command, cwd });
+    if (gitCheck) {
+      logDecision({ hook: "PreToolUse", tool: "Bash", gitSafety: true, ...gitCheck });
+      if (gitCheck.decision === "deny" || gitCheck.decision === "ask") {
+        return emit({
+          hookSpecificOutput: {
+            hookEventName: "PreToolUse",
+            permissionDecision: gitCheck.decision,
+            permissionDecisionReason: gitCheck.reason,
+          },
+        });
+      }
+    }
+  }
 
   let verdict = { decision: ALLOW, reason: "not guarded", by: "code" };
   if (GUARDED_TOOLS.has(toolName)) {
@@ -75,30 +97,56 @@ async function preToolUse(event) {
     });
   }
 
+  // Thrashing and goal drift check
+  let thrashingWarning = null;
+  if (config.supervision && transcriptPath) {
+    try {
+      const { warning } = await checkGoalDriftAndThrashing({ transcriptPath, latestRequest: task });
+      if (warning) {
+        thrashingWarning = warning;
+        logDecision({ hook: "PreToolUse", thrashingWarning: true });
+      }
+    } catch {}
+  }
+
   // Allowed. Now: is this a command whose output is going to be bloat?
-  //
-  // Note what is deliberately absent — no `permissionDecision: "allow"`.
-  // Emitting it would skip the permission prompt, and quietly widening
-  // what runs without asking is not this layer's job.
-  if (toolName !== "Bash") return nothing();
+  if (toolName !== "Bash") {
+    return thrashingWarning ? emit({ systemMessage: thrashingWarning }) : nothing();
+  }
 
   const command = input?.command;
   const { wrap, why } = shouldWrap(command);
   if (!wrap) {
     logDecision({ hook: "PreToolUse", tool: "Bash", wrapped: false, reason: why });
-    return nothing();
+    return thrashingWarning ? emit({ systemMessage: thrashingWarning }) : nothing();
   }
 
   const updated = rewrite(command, task);
   logDecision({ hook: "PreToolUse", tool: "Bash", wrapped: true, matched: why, command: command.slice(0, 200) });
 
+  const msg = [thrashingWarning, `jev: routing ${why} output through the slimmer`].filter(Boolean).join("\n");
   return emit({
     hookSpecificOutput: {
       hookEventName: "PreToolUse",
       updatedInput: { ...input, command: updated },
     },
-    systemMessage: `jev: routing ${why} output through the slimmer`,
+    systemMessage: msg,
   });
+}
+
+// ── PostToolUse ──────────────────────────────────────────────────────
+
+async function postToolUse(event) {
+  if (event.error || event.tool_result?.is_error) {
+    try {
+      await triageToolError({
+        toolName: event.tool_name,
+        input: event.tool_input,
+        error: event.error || event.tool_result?.content,
+      });
+    } catch {}
+  }
+  return nothing();
 }
 
 // ── PreCompact ───────────────────────────────────────────────────────
@@ -145,6 +193,8 @@ async function main() {
   switch (event.hook_event_name) {
     case "PreToolUse":
       return await preToolUse(event);
+    case "PostToolUse":
+      return await postToolUse(event);
     case "PreCompact":
       return await preCompact(event);
     case "SessionStart":

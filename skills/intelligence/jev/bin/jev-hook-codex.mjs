@@ -37,6 +37,12 @@ import { fileURLToPath } from "node:url";
 import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
 import { shouldWrap, rewrite } from "../lib/wrap.mjs";
 import { buildBrief, consumeBrief } from "../lib/carryforward.mjs";
+import {
+  checkGoalDriftAndThrashing,
+  checkDefinitionOfDone,
+  triageToolError,
+  checkGitSafety,
+} from "../lib/supervision.mjs";
 import { latestUserRequest, recentToolCalls, observedPaths } from "../lib/transcript.mjs";
 import { logDecision, stateDir } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
@@ -155,6 +161,33 @@ async function preToolUse(event) {
   const { tool_name: toolName, tool_input: input, cwd } = event;
   const task = taskFor(event);
   const started = Date.now();
+
+  // Git safety check on commits and pushes
+  if (toolName === "Bash" && config.gitSafety) {
+    const foundCmd = readCommand(input);
+    if (foundCmd) {
+      const gitCheck = checkGitSafety({ command: foundCmd.command, cwd });
+      if (gitCheck) {
+        logDecision({
+          agent: "codex",
+          hook: "PreToolUse",
+          tool: "Bash",
+          gitSafety: true,
+          decision: gitCheck.decision,
+          reason: gitCheck.reason,
+        });
+        if (gitCheck.decision === "deny" || gitCheck.decision === "ask") {
+          return emit({
+            hookSpecificOutput: {
+              hookEventName: "PreToolUse",
+              permissionDecision: gitCheck.decision,
+              permissionDecisionReason: gitCheck.reason,
+            },
+          });
+        }
+      }
+    }
+  }
 
   let verdict = { decision: ALLOW, reason: "not guarded", by: "code" };
   if (GUARDED_TOOLS.has(toolName)) {
@@ -279,8 +312,31 @@ function sessionStart(event) {
 
 // ── SessionEnd ───────────────────────────────────────────────────────
 
-function sessionEnd(event) {
+async function sessionEnd(event) {
   dropPrompt(event.session_id);
+  if (config.dodGate && event.transcript_path) {
+    try {
+      const dod = await checkDefinitionOfDone({ transcriptPath: event.transcript_path });
+      if (!dod.allow) {
+        logDecision({ agent: "codex", hook: "SessionEnd", unverified: true, reason: dod.reason });
+      }
+    } catch {}
+  }
+  return nothing();
+}
+
+// ── PostToolUse ──────────────────────────────────────────────────────
+
+async function postToolUse(event) {
+  if (event.error || event.tool_result?.is_error) {
+    try {
+      await triageToolError({
+        toolName: event.tool_name,
+        input: event.tool_input,
+        error: event.error || event.tool_result?.content,
+      });
+    } catch {}
+  }
   return nothing();
 }
 
@@ -299,6 +355,8 @@ async function main() {
   switch (event.hook_event_name) {
     case "PreToolUse":
       return await preToolUse(event);
+    case "PostToolUse":
+      return await postToolUse(event);
     case "UserPromptSubmit":
       return userPromptSubmit(event);
     case "PreCompact":
@@ -306,7 +364,7 @@ async function main() {
     case "SessionStart":
       return sessionStart(event);
     case "SessionEnd":
-      return sessionEnd(event);
+      return await sessionEnd(event);
     default:
       return nothing();
   }

@@ -21,8 +21,8 @@ briefs, saved output, or copied skill files.
 
 | Adapter | Config default / override | Implemented events |
 | --- | --- | --- |
-| Claude Code | `~/.claude/settings.json` / `CLAUDE_SETTINGS` | PreToolUse, PreCompact, SessionStart/compact |
-| Codex | `${CODEX_HOME:-~/.codex}/hooks.json` / `CODEX_HOOKS` | Same plus UserPromptSubmit and SessionEnd |
+| Claude Code | `~/.claude/settings.json` / `CLAUDE_SETTINGS` | PreToolUse, PostToolUse, PreCompact, SessionStart/compact |
+| Codex | `${CODEX_HOME:-~/.codex}/hooks.json` / `CODEX_HOOKS` | PreToolUse, PostToolUse, UserPromptSubmit, PreCompact, SessionStart, SessionEnd |
 | Antigravity | `~/.gemini/config/hooks.json` / `JEV_ANTIGRAVITY_HOOKS` | PreToolUse, PreInvocation, PostToolUse, Stop |
 
 The table describes adapter assumptions, not verified support in every host
@@ -34,12 +34,26 @@ No host version has been certified by the offline suite.
 Codex integrations may require `/hooks` trust and enabled hooks in the host.
 Verify those controls exist in the installed build. Antigravity's config path is
 `~/.gemini/config/hooks.json` by default. `JEV_ANTIGRAVITY_MATCHER` controls tool
-names registered by its installer. Antigravity supports:
-- **PreToolUse guard & slimming**: deterministic checks, git pre-commit/force-push safety, and command output slimming via `overwrite: { CommandLine: ... }`.
-- **PreInvocation context & guidance**: injects single-use carry-forward briefs across compaction and alerts on repeated tool thrashing or goal drift via `injectSteps`.
-- **PostToolUse error triage**: classifies tool execution errors into structured categories and logs diagnostics.
-- **Stop Definition of Done gate**: prevents termination via `decision: "continue"` if files were edited without subsequent test verification.
-- **Skill packaging**: `./install-skill.sh antigravity` installs directly to `~/.gemini/config/skills/jev`.
+names registered by its installer.
+
+### Supported Host Capabilities
+
+- **Claude Code**:
+  - **PreToolUse**: deterministic safety checks, git safety (force push and sensitive commit detection escalates to `ask`), command output slimming via `updatedInput.command`, and thrashing/goal drift warnings injected via `systemMessage`.
+  - **PostToolUse**: error triage classifying tool execution failures into structured categories and logging diagnostics.
+  - **PreCompact & SessionStart**: context harvesting and single-use carry-forward brief injection across compaction.
+- **Codex**:
+  - **PreToolUse**: deterministic safety checks, git safety (`ask`), and command slimming via `updatedInput.command` (handling string and argv shapes).
+  - **PostToolUse**: error triage classifying tool execution failures into structured categories.
+  - **UserPromptSubmit**: prompt stashing for task-directed slimming without guessing transcript formats.
+  - **PreCompact & SessionStart**: carry-forward brief injection across compaction.
+  - **SessionEnd**: prompt cleanup and Definition of Done verification audit logging.
+- **Antigravity**:
+  - **PreToolUse**: deterministic checks, git pre-commit/force-push safety, and command output slimming via `overwrite: { CommandLine: ... }`.
+  - **PreInvocation**: injects single-use carry-forward briefs across compaction and alerts on repeated tool thrashing or goal drift via `injectSteps`.
+  - **PostToolUse**: classifies tool execution errors into structured categories and logs diagnostics.
+  - **Stop**: Definition of Done gate preventing completion via `decision: "continue"` if files were edited without subsequent test verification.
+  - **Skill packaging**: `./install-skill.sh antigravity` installs directly to `~/.gemini/config/skills/jev`.
 
 Restart the target host after registration or environment changes. Verify in
 three stages: registration; direct synthetic adapter event; real host tool call.

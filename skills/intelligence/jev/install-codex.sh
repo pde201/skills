@@ -99,10 +99,14 @@ jq --arg cmd "$HOOK_CMD" "$DEJEV"'
   .hooks //= {}
   | .hooks |= with_entries(.value |= dejev)
 
-  # Guards the call and rewrites bloated commands. Codex reports edits as
+  # Guards the call, checks git safety, and rewrites bloated commands. Codex reports edits as
   # apply_patch; Edit and Write are matcher aliases for the same thing.
   | .hooks.PreToolUse =
       ((.hooks.PreToolUse // [])) + [ entry("Bash|apply_patch|Edit|Write|Read"; 15; "jev: checking the tool call") ]
+
+  # Triages errors from failing tools.
+  | .hooks.PostToolUse =
+      ((.hooks.PostToolUse // [])) + [ entry("Bash|apply_patch|Edit|Write|Read"; 10; "jev: triaging error") ]
 
   # Remembers what was asked for. PreToolUse carries no prompt, and this
   # is a far better answer than guessing at the transcript format.
@@ -117,14 +121,14 @@ jq --arg cmd "$HOOK_CMD" "$DEJEV"'
   | .hooks.SessionStart =
       ((.hooks.SessionStart // [])) + [ entry("compact"; 10; "jev: restoring the brief") ]
 
-  # Clears the stashed prompt. Codex caps this event at 3 seconds.
+  # Clears the stashed prompt and evaluates DoD verification. Codex caps this event at 3 seconds.
   | .hooks.SessionEnd =
       ((.hooks.SessionEnd // [])) + [ entry(""; 3; "jev: cleaning up") ]
 ' "$HOOKS" > "$tmp"
 
 jq empty "$tmp" || { warn "refusing to write invalid JSON; hooks untouched"; rm -f "$tmp"; exit 1; }
 mv "$tmp" "$HOOKS"
-ok "PreToolUse, UserPromptSubmit, PreCompact, SessionStart and SessionEnd registered"
+ok "PreToolUse, PostToolUse, UserPromptSubmit, PreCompact, SessionStart and SessionEnd registered"
 
 mkdir -p "$BIN_DIR"
 ln -sfn "$JEV_DIR/bin/jev-slim.mjs" "$BIN_DIR/jev-slim"

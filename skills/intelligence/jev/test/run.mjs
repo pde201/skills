@@ -381,6 +381,27 @@ test("malformed input does not break the hook", () => {
   assert.equal(out.trim(), "");
 });
 
+test("claude: PreToolUse asks on force push to main", () => {
+  const result = runHook({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "git push --force origin main" },
+    cwd: process.cwd(),
+  });
+  assert.equal(result.hookSpecificOutput.permissionDecision, "ask");
+  assert.match(result.hookSpecificOutput.permissionDecisionReason, /force push/i);
+});
+
+test("claude: PostToolUse triages error without failing", () => {
+  const result = runHook({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "npm test" },
+    error: "exit status 1",
+  });
+  assert.equal(result, null);
+});
+
 test("an unknown event is ignored", () => {
   assert.equal(runHook({ hook_event_name: "SomethingNew" }), null);
 });
@@ -601,6 +622,43 @@ test("codex: an unknown event is ignored", () => {
 test("codex: malformed input does not break the hook", () => {
   const out = execFileSync("node", [CODEX_HOOK], { input: "not json at all" }).toString();
   assert.equal(out.trim(), "");
+});
+
+test("codex: PreToolUse asks on force push to main", () => {
+  const result = runCodex({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "git push --force origin main" },
+    cwd: process.cwd(),
+  });
+  assert.equal(result.hookSpecificOutput.permissionDecision, "ask");
+  assert.match(result.hookSpecificOutput.permissionDecisionReason, /force push/i);
+});
+
+test("codex: PostToolUse triages error without failing", () => {
+  const result = runCodex({
+    hook_event_name: "PostToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "npm test" },
+    error: "exit status 1",
+  });
+  assert.equal(result, null);
+});
+
+test("codex: SessionEnd evaluates DoD and cleans up without failing", () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "codex-dod-"));
+  const transcriptPath = join(tmpDir, "edited.jsonl");
+  writeFileSync(transcriptPath, JSON.stringify({
+    source: "MODEL",
+    type: "GENERIC",
+    tool_calls: [{ name: "apply_patch", args: {} }],
+  }) + "\n");
+  const result = runCodex({
+    hook_event_name: "SessionEnd",
+    session_id: "codex-session-dod",
+    transcript_path: transcriptPath,
+  });
+  assert.equal(result, null);
 });
 
 // ── the Antigravity adapter ──────────────────────────────────────────

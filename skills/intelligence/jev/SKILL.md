@@ -43,8 +43,8 @@ To register or audit hooks across supported hosts:
    ./install.sh <agent>
    ```
 3. Verify host-specific requirements:
-   - **Claude Code**: Verifies `~/.claude/settings.json` has `PreToolUse`, `PreCompact`, `SessionStart`.
-   - **Codex**: Must approve registered hooks inside Codex via `/hooks`. Confirm `~/.codex/config.toml` does not have `hooks = false`.
+   - **Claude Code**: Verifies `~/.claude/settings.json` has `PreToolUse` (guarding, git safety, command slimming, thrashing warning injection), `PostToolUse` (error triage), `PreCompact`, and `SessionStart`.
+   - **Codex**: Verifies `${CODEX_HOME:-~/.codex}/hooks.json` has `PreToolUse` (guarding, git safety, string/argv slimming), `PostToolUse` (error triage), `UserPromptSubmit`, `PreCompact`, `SessionStart`, and `SessionEnd` (Definition of Done audit logging and cleanup). Must approve registered hooks inside Codex via `/hooks`. Confirm `~/.codex/config.toml` does not have `hooks = false`.
    - **Antigravity**: Hooks register in `~/.gemini/config/hooks.json` (overridable via `JEV_ANTIGRAVITY_HOOKS`). Supports `PreToolUse` (guarding, git safety, command slimming via overwrite), `PreInvocation` (carry-forward briefs & thrashing/drift guidance), `PostToolUse` (error triage), and `Stop` (Definition of Done verification gate). Install skill globally via `./install-skill.sh antigravity`.
 4. Restart the agent session to load modified hook configurations.
 5. **Completion Criterion**: `./install.sh <agent> --check` prints positive registration, host trust is confirmed, and a test session writes a record to `jev-log.jsonl`.

@@ -13,13 +13,17 @@ const path = require("path");
 // argument picks which agent's *hooks* to register. One installed copy can
 // serve every agent on the machine.
 const SELF = "install.js";
+const SELF_PATH = __filename;
 
 function usage() {
   console.log(`Install the Acuity jev skill.
 
-Usage:
-  npx --yes github:pde201/skills/skills/intelligence/jev [codex|claude] [--force]
-  npx --yes github:pde201/skills/skills/intelligence/jev --dest /path/to/skills-dir [--force]
+Usage (npm's npx cannot resolve a git subdirectory's manifest before
+installing, so fetch via a sparse clone instead of "npx github:..."):
+  git clone --filter=blob:none --sparse --depth 1 https://github.com/pde201/skills.git /tmp/jev-install
+  git -C /tmp/jev-install sparse-checkout set skills/intelligence/jev
+  node /tmp/jev-install/skills/intelligence/jev/bin/install.js [codex|claude] [--force]
+  node /tmp/jev-install/skills/intelligence/jev/bin/install.js --dest /path/to/skills-dir [--force]
 
 Targets:
   codex   Install to \${CODEX_HOME:-$HOME/.codex}/skills
@@ -124,7 +128,7 @@ function main() {
     console.error(`error: ${destDir} already exists
 
 Run with --force to replace it:
-  npx --yes github:pde201/skills/skills/intelligence/jev ${options.target} --force`);
+  node ${SELF_PATH} ${options.target} --force`);
     process.exit(1);
   }
 

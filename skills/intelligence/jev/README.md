@@ -45,10 +45,15 @@ files can tell the agent to reach for it.
 ## Install
 
 Two steps, because they do unrelated things. First put the skill somewhere
-your agent will find it:
+your agent will find it. `npx github:owner/repo#path:subdir` looks like the
+right tool, but npm resolves a git dependency's manifest before applying the
+`#path:` subdirectory, so it fails trying to read a `package.json` that only
+exists one level down — a sparse clone sidesteps that entirely:
 
 ```bash
-npx --yes github:pde201/skills/skills/intelligence/jev claude   # or: codex
+git clone --filter=blob:none --sparse --depth 1 https://github.com/pde201/skills.git /tmp/jev-install
+git -C /tmp/jev-install sparse-checkout set skills/intelligence/jev
+node /tmp/jev-install/skills/intelligence/jev/bin/install.js claude   # or: codex
 ```
 
 Then register the hooks from the installed copy, naming the agent:

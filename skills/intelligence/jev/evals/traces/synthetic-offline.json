@@ -1,12 +1,12 @@
 {
   "schemaVersion": 1,
-  "name": "jev-offline-benchmark-traces",
+  "name": "jev-synthetic-offline-traces",
   "traces": [
     {
       "schemaVersion": 1,
       "caseId": "selection.relevant-output-truncation",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -24,8 +24,8 @@
     {
       "schemaVersion": 1,
       "caseId": "selection.relevant-hook-error",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -43,8 +43,8 @@
     {
       "schemaVersion": 1,
       "caseId": "selection.unrelated-truncation",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -62,8 +62,8 @@
     {
       "schemaVersion": 1,
       "caseId": "installer.check-only-no-mutation",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -88,8 +88,8 @@
     {
       "schemaVersion": 1,
       "caseId": "installer.explicit-approval-required",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -114,8 +114,8 @@
     {
       "schemaVersion": 1,
       "caseId": "missing-key.safe-fail-open",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -140,8 +140,8 @@
     {
       "schemaVersion": 1,
       "caseId": "missing-key.deterministic-danger-still-escalates",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -166,8 +166,8 @@
     {
       "schemaVersion": 1,
       "caseId": "calibration.five-logs-insufficient",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -192,8 +192,8 @@
     {
       "schemaVersion": 1,
       "caseId": "recovery.saved-output-without-rerun",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -218,8 +218,8 @@
     {
       "schemaVersion": 1,
       "caseId": "sensitive-data.boundary",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -244,8 +244,8 @@
     {
       "schemaVersion": 1,
       "caseId": "supervision.git-force-push-escalates",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -263,8 +263,8 @@
     {
       "schemaVersion": 1,
       "caseId": "supervision.git-staged-secrets-detected",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -282,8 +282,8 @@
     {
       "schemaVersion": 1,
       "caseId": "supervision.error-triage-classification",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -301,8 +301,8 @@
     {
       "schemaVersion": 1,
       "caseId": "supervision.dod-unverified-changes-blocked",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -320,8 +320,8 @@
     {
       "schemaVersion": 1,
       "caseId": "supervision.dod-tested-changes-pass",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -339,8 +339,8 @@
     {
       "schemaVersion": 1,
       "caseId": "supervision.thrashing-loop-guidance",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -365,8 +365,8 @@
     {
       "schemaVersion": 1,
       "caseId": "slimming.non-zero-exit-preserved",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -391,8 +391,8 @@
     {
       "schemaVersion": 1,
       "caseId": "slimming.line-budget-anchors-kept",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -417,8 +417,8 @@
     {
       "schemaVersion": 1,
       "caseId": "guard.credential-read-denied",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -436,8 +436,8 @@
     {
       "schemaVersion": 1,
       "caseId": "guard.repeat-failure-escalates",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -455,8 +455,8 @@
     {
       "schemaVersion": 1,
       "caseId": "carryforward.prompt-constraints-survive",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {
@@ -474,8 +474,8 @@
     {
       "schemaVersion": 1,
       "caseId": "carryforward.single-consumption",
-      "runId": "offline-benchmark-001",
-      "source": "offline-agent",
+      "runId": "synthetic-offline-001",
+      "source": "harness-test",
       "repetition": 1,
       "events": [
         {

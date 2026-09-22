@@ -243,6 +243,10 @@ const validateProbabilityMap = (probabilities, allowed, where) => {
     invalidResponse(`${where}.probabilities`, "contains a missing or unknown option");
   }
   for (const key of keys) finiteProbability(probabilities[key], `${where}.probabilities.${key}`);
+  const total = keys.reduce((sum, key) => sum + probabilities[key], 0);
+  if (Math.abs(total - 1) > 0.02) {
+    invalidResponse(`${where}.probabilities`, "probabilities must sum to approximately 1");
+  }
 };
 
 const validateNoul = (answer, where) => {

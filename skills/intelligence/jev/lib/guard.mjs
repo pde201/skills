@@ -18,7 +18,10 @@
 // ──────────────────────────────────────────────────────────────────────
 
 import { existsSync, readFileSync, statSync } from "node:fs";
+import { resolve, join } from "node:path";
+import { tmpdir, homedir } from "node:os";
 import { systemOne, noul, score, nouls, pickScore, costUsd, haveKey } from "./client.mjs";
+import { looksLikeSecretFile } from "./privacy.mjs";
 import config from "./config.mjs";
 
 export const ALLOW = "allow";
@@ -34,9 +37,14 @@ const strictest = (decisions) => PRECEDENCE.find((d) => decisions.includes(d)) ?
 // Patterns that are catastrophic regardless of intent. Short, and every
 // entry earns its place — this is not a general-purpose linter.
 const CATASTROPHIC = [
-  { re: /\brm\s+(-[a-zA-Z]*\s+)*-?[a-zA-Z]*[rf][a-zA-Z]*\s+\/(\s|$)/, why: "recursive delete of /" },
+  // Any option may sit between `rm` and a bare `/` or `/*` — including the
+  // long `--no-preserve-root`, which is the one that makes the delete work.
+  { re: /\brm\b(?:\s+-{1,2}[\w-]+)*\s+\/(?:\*)?(\s|$)/, why: "recursive delete of /" },
+  { re: /\brm\b[^|;&]*--no-preserve-root/, why: "recursive delete with --no-preserve-root" },
   { re: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*f?\s+(~|\$HOME)(\/\s*)?(\s|$)/, why: "recursive delete of the home directory" },
-  { re: /\bgit\s+push\b[^|;&]*--force(?!-with-lease)/, why: "force push without --force-with-lease" },
+  // `--force` and `-f` alike; `--force-with-lease` and `--force-if-includes`
+  // are the safe spellings and are deliberately not matched.
+  { re: /\bgit\s+push\b[^|;&]*\s(--force|-f)(\s|$)/, why: "force push without --force-with-lease" },
   { re: /\bgit\s+(reset\s+--hard|clean\s+-[a-zA-Z]*f)/, why: "discards uncommitted work irreversibly" },
   { re: /\b(mkfs|dd\s+if=[^\s]+\s+of=\/dev\/)/, why: "writes directly to a device" },
   { re: /\bchmod\s+-R\s+777\s+\//, why: "recursive permission change from the filesystem root" },
@@ -163,11 +171,16 @@ const HAZARDS = {
   },
   wrong_scope: {
     action: ASK,
+    // Not asked when a file tool's target lies inside the workspace: the
+    // answer is knowable from the path, and asking anyway was 33 of 57
+    // asks on real sessions — every one a sibling checkout or a scratch
+    // directory the session had already been writing to.
+    needsOutsideWorkspace: true,
     question: noul(
-      "Does the tool call in `call` reach outside the working directory in `cwd` to change something, when `task` gave no reason to?",
+      "Does the tool call in `call` change something outside the workspace, when `task` gave no reason to? The workspace is every directory listed in `workspace_roots` and everything beneath them: the working directory, the host's workspace folders, directories this session has already written to, and the temp directory. Reading outside the workspace is not a scope violation; sending data to a network service or altering shared state is.",
       {
-        true: "It writes to or alters something outside the project, unprompted",
-        false: "It stays within the project, only reads outside it, or was asked to reach outside",
+        true: "It writes to, alters or publishes something outside the workspace, unprompted",
+        false: "It stays within the workspace, only reads outside it, or was asked to reach outside",
       },
     ),
   },
@@ -227,6 +240,71 @@ export function namesAPath(input) {
   return /\//.test(text) || /\b[\w.\-@+]+\.[A-Za-z]\w{0,7}\b/.test(text);
 }
 
+// ── The workspace ────────────────────────────────────────────────────
+//
+// `wrong_scope` used to be judged against `cwd` alone, which reads a
+// sibling checkout, a scratch directory or a skill under ~/.claude as
+// "outside the project" even when the session has been working there all
+// along. The workspace is wider than the cwd, and it is knowable.
+
+const expandHome = (p) => (p === "~" || p.startsWith("~/") ? join(homedir(), p.slice(1)) : p);
+const normalizePath = (p, cwd) => resolve(cwd || process.cwd(), expandHome(String(p).trim())).replace(/\/+$/, "") || "/";
+
+// macOS reaches /tmp and /var through /private; a path may be spelled either way.
+const privateAliases = (p) => {
+  if (/^\/private\/(tmp|var|etc)(\/|$)/.test(p)) return [p, p.replace(/^\/private/, "")];
+  if (/^\/(tmp|var|etc)(\/|$)/.test(p)) return [p, `/private${p}`];
+  return [p];
+};
+
+/**
+ * Every directory that counts as "the workspace" for a scope judgment.
+ *
+ * @param {{cwd?: string, hostRoots?: string[], writtenDirs?: string[]}} opts
+ *   hostRoots   — workspace folders the host reports (Antigravity `workspacePaths`)
+ *   writtenDirs — directories this session has already changed files in
+ */
+export function workspaceRoots({ cwd, hostRoots = [], writtenDirs = [] } = {}) {
+  const base = cwd || process.cwd();
+  const roots = new Set();
+  const add = (p) => {
+    if (typeof p !== "string" || !p.trim()) return;
+    for (const alias of privateAliases(normalizePath(p, base))) roots.add(alias);
+  };
+  add(base);
+  for (const root of hostRoots) add(root);
+  for (const root of config.workspaceRoots) add(root);
+  for (const dir of writtenDirs) add(dir);
+  add(tmpdir());
+  add("/tmp");
+  if (process.env.TMPDIR) add(process.env.TMPDIR);
+  return [...roots];
+}
+
+/** Is `path` one of the roots or beneath one of them? Lexical, no filesystem access. */
+export function insideWorkspace(path, roots, cwd) {
+  if (typeof path !== "string" || !path.trim()) return false;
+  const candidates = privateAliases(normalizePath(path, cwd));
+  return candidates.some((full) => roots.some((root) => full === root || full.startsWith(`${root}/`)));
+}
+
+/** The files a call would change, when that is knowable from its input. */
+export function targetPaths(toolName, input) {
+  if (["Edit", "Write", "NotebookEdit", "MultiEdit"].includes(toolName)) {
+    const path = input?.file_path ?? input?.notebook_path;
+    return typeof path === "string" && path.trim() ? [path] : [];
+  }
+  if (toolName === "apply_patch" && typeof input?.patch === "string") {
+    return [...input.patch.matchAll(/^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm)].map((m) => m[1].trim());
+  }
+  return [];
+}
+
+const changesOnlyInsideWorkspace = (call, roots) => {
+  const targets = targetPaths(call.toolName, call.input);
+  return targets.length > 0 && targets.every((path) => insideWorkspace(path, roots, call.cwd));
+};
+
 const BLAST_RADIUS = [
   "Reads or inspects only; nothing is changed",
   "Changes one file or a small set of files inside the project",
@@ -243,12 +321,14 @@ const BLAST_RADIUS = [
  * Omitting one changes no other answer — questions batched over a single
  * state are scored independently — so this only removes noise.
  *
- * @param {{toolName?: string, input?: any}} [call] omit to get every question
+ * @param {{toolName?: string, input?: any, cwd?: string}} [call] omit to get every question
+ * @param {string[]} [roots] the workspace, from workspaceRoots(); omit to always ask about scope
  */
-export function guardQuestions(call) {
+export function guardQuestions(call, roots) {
   const questions = { blast_radius: score("How far do the effects of the tool call in `call` reach?", BLAST_RADIUS) };
-  for (const [id, { question, needsPath }] of Object.entries(HAZARDS)) {
+  for (const [id, { question, needsPath, needsOutsideWorkspace }] of Object.entries(HAZARDS)) {
     if (needsPath && call && !namesAPath(call.input)) continue;
+    if (needsOutsideWorkspace && call && roots && changesOnlyInsideWorkspace(call, roots)) continue;
     questions[id] = question;
   }
   return questions;
@@ -343,16 +423,31 @@ export function decide(probabilities, radius) {
 /**
  * @returns {Promise<{decision: string, reason: string, by: string, signals?: object, cost?: number}>}
  */
-export async function guard({ toolName, input, cwd, task, recentCalls, observed, model } = {}) {
+export async function guard({ toolName, input, cwd, task, recentCalls, observed, hostRoots, writtenDirs, model } = {}) {
   const pass = (reason) => ({ decision: ALLOW, reason, by: "code" });
 
   const deterministic = deterministicCheck(toolName, input, cwd);
   if (deterministic) return deterministic;
 
   if (!config.guard) return pass("guard disabled");
+
+  // A Read changes nothing, and the read-only gate below would suppress
+  // every hazard but two anyway. The one that lands on read — exposing a
+  // credential — is a fact about the path, so code asks it: a model round
+  // trip on every file the agent looks at bought nothing on real sessions
+  // (26 of 26 allowed) and cost ~300 ms each.
+  if (toolName === "Read" && !config.guardReadsWithModel) {
+    const path = input?.file_path;
+    if (looksLikeSecretFile(path)) {
+      return { decision: ASK, reason: `${path} usually holds credentials. Confirm before it is read.`, by: "code" };
+    }
+    return pass("read-only tool: deterministic checks only");
+  }
+
   if (!haveKey()) return pass("no api key");
 
-  const questions = guardQuestions({ toolName, input });
+  const roots = workspaceRoots({ cwd, hostRoots, writtenDirs });
+  const questions = guardQuestions({ toolName, input, cwd }, roots);
   // A question that was never asked is not a hazard that stayed quiet, and
   // the log has to be able to tell those apart — otherwise a question this
   // gate has silently stopped asking looks exactly like one that is asking
@@ -366,6 +461,7 @@ export async function guard({ toolName, input, cwd, task, recentCalls, observed,
       state: {
         task: task || "(not stated)",
         cwd: cwd || process.cwd(),
+        workspace_roots: roots,
         call: { tool: toolName, input },
         recent_calls: recentCalls ?? [],
         paths_seen_this_session: observed ?? [],

@@ -33,6 +33,9 @@ export const config = {
   carryForward: bool("JEV_HOOKS_CARRY_FORWARD", true),
   supervision: bool("JEV_HOOKS_SUPERVISION", true),
   dodGate: bool("JEV_DOD_GATE", true),
+  // How many times the Stop gate may send the agent back before standing
+  // down for that conversation. Claude Code caps its own Stop hooks at 8.
+  dodMaxContinues: num("JEV_DOD_MAX_CONTINUES", 2),
   gitSafety: bool("JEV_GIT_SAFETY", true),
   thrashingThreshold: num("JEV_THRASHING_THRESHOLD", 0.75),
 
@@ -41,6 +44,12 @@ export const config = {
   timeoutMs: num("JEV_TIMEOUT_MS", 4000),
   retries: num("JEV_RETRIES", 1),
   model: process.env.JEV_MODEL || "jev-latest",
+
+  // After this many consecutive provider failures (5xx, 429, timeout,
+  // network — never a 4xx or a malformed answer, which are our bugs) remote
+  // judgments are skipped for the cooldown and fail open at once. 0 disables.
+  breakerFailures: num("JEV_BREAKER_FAILURES", 3),
+  breakerCooldownMs: num("JEV_BREAKER_COOLDOWN_MS", 60_000),
 
   // Output below this many lines is not worth a round trip.
   slimMinLines: num("JEV_SLIM_MIN_LINES", 60),
@@ -52,8 +61,20 @@ export const config = {
   guardDenyAt: num("JEV_GUARD_DENY_AT", 0.85),
   guardBlastRadiusBlock: num("JEV_GUARD_BLAST_RADIUS_BLOCK", 3),
 
+  // Extra directories that count as the workspace for `wrong_scope`, on top
+  // of the cwd, the host's workspace folders, the directories this session
+  // has already written to, and the temp directory. Comma-separated; `~` ok.
+  workspaceRoots: list("JEV_WORKSPACE_ROOTS", []),
+
+  // A Read changes nothing, so by default it gets the deterministic checks
+  // only (existence, directory, credential-shaped path) and no model call.
+  // On real sessions 26 of 26 Read judgments were allowed at ~300 ms each.
+  guardReadsWithModel: bool("JEV_GUARD_READ_MODEL", false),
+
   // Commands whose output is reliably bloated. Only these get wrapped;
-  // anything else runs exactly as the model wrote it.
+  // anything else runs exactly as the model wrote it. git, gh, grep and ls
+  // are deliberately absent: on real sessions they were 53 of 59 wrapped
+  // commands and not one of them produced a slimmer output.
   slimCommands: list("JEV_SLIM_COMMANDS", [
     "npm", "pnpm", "yarn", "bun", "npx",
     "pytest", "python", "python3", "tox", "uv",
@@ -61,8 +82,8 @@ export const config = {
     "cargo", "go", "gradle", "mvn", "dotnet", "make", "just",
     "kubectl", "docker", "helm", "terraform", "aws", "gcloud",
     "tsc", "eslint", "ruff", "mypy", "pylint",
-    "find", "tree", "rg", "grep", "ls", "du", "df",
-    "git", "gh", "curl", "xh", "http",
+    "find", "tree", "rg", "du", "df",
+    "curl", "xh", "http",
   ]),
 
   // Never wrap these, whatever else matches: they stream, need a terminal,

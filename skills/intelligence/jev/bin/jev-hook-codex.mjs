@@ -35,7 +35,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 
 import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
-import { shouldWrap, rewrite } from "../lib/wrap.mjs";
+import { shouldWrap, rewrite, dropTask } from "../lib/wrap.mjs";
 import { buildBrief, consumeBrief } from "../lib/carryforward.mjs";
 import {
   checkGoalDriftAndThrashing,
@@ -43,7 +43,7 @@ import {
   triageToolError,
   checkGitSafety,
 } from "../lib/supervision.mjs";
-import { latestUserRequest, recentToolCalls, observedPaths } from "../lib/transcript.mjs";
+import { latestUserRequest, recentToolCalls, observedPaths, writtenDirs } from "../lib/transcript.mjs";
 import { logDecision, stateDir } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
 
@@ -198,6 +198,7 @@ async function preToolUse(event) {
       task,
       recentCalls: recentToolCalls(event.transcript_path),
       observed: observedPaths(event.transcript_path),
+      writtenDirs: writtenDirs(event.transcript_path),
     });
   }
 
@@ -260,7 +261,7 @@ async function preToolUse(event) {
 
   const hookSpecificOutput = {
     hookEventName: "PreToolUse",
-    updatedInput: writeCommand(input, rewrite(found.command, task), found),
+    updatedInput: writeCommand(input, rewrite(found.command, task, { key: event.session_id }), found),
   };
   if (SLIM_SELF_APPROVES) {
     hookSpecificOutput.permissionDecision = "allow";
@@ -314,9 +315,11 @@ function sessionStart(event) {
 
 async function sessionEnd(event) {
   dropPrompt(event.session_id);
+  dropTask(event.session_id);
   if (config.dodGate && event.transcript_path) {
     try {
-      const dod = await checkDefinitionOfDone({ transcriptPath: event.transcript_path });
+      // Codex gives this event three seconds. One attempt, well inside it.
+      const dod = await checkDefinitionOfDone({ transcriptPath: event.transcript_path, timeoutMs: 1500, retries: 0 });
       if (!dod.allow) {
         logDecision({ agent: "codex", hook: "SessionEnd", unverified: true, reason: dod.reason });
       }
@@ -325,15 +328,20 @@ async function sessionEnd(event) {
   return nothing();
 }
 
-// ── PostToolUse ──────────────────────────────────────────────────────
+// ── PostToolUse / PostToolUseFailure ─────────────────────────────────
+//
+// Codex's failure event shape is not pinned down by documentation this repo
+// can cite, so both names are accepted and both error spellings are read.
 
 async function postToolUse(event) {
-  if (event.error || event.tool_result?.is_error) {
+  const error = event.error || (event.tool_result?.is_error ? event.tool_result?.content : null);
+  if (error && !event.is_interrupt) {
     try {
       await triageToolError({
         toolName: event.tool_name,
         input: event.tool_input,
-        error: event.error || event.tool_result?.content,
+        error,
+        agent: "codex",
       });
     } catch {}
   }
@@ -356,6 +364,7 @@ async function main() {
     case "PreToolUse":
       return await preToolUse(event);
     case "PostToolUse":
+    case "PostToolUseFailure":
       return await postToolUse(event);
     case "UserPromptSubmit":
       return userPromptSubmit(event);

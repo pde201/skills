@@ -33,6 +33,29 @@ warn(){ printf "  \033[33m!\033[0m %s\n" "$*"; }
 command -v jq   >/dev/null || { warn "jq is required"; exit 1; }
 command -v node >/dev/null || { warn "node is required"; exit 1; }
 
+# The hooks need built-in fetch (Node 18+); the tests and evals need 22+.
+NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)"
+if [ "$NODE_MAJOR" -lt 18 ]; then
+  warn "node $NODE_MAJOR is too old — the hooks need Node 18+, the tests and evals Node 22+"
+  exit 1
+elif [ "$NODE_MAJOR" -lt 22 ]; then
+  warn "node $NODE_MAJOR runs the hooks; npm test and the evals need Node 22+"
+fi
+
+# Hooks are registered by absolute path. A copy in a temp directory works
+# until the directory is cleaned up, then every session reports a broken hook.
+warn_if_temporary() {
+  local tmp_prefix="${TMPDIR:-/nonexistent-tmpdir}"
+  tmp_prefix="${tmp_prefix%/}"
+  case "$JEV_DIR" in
+    "$tmp_prefix"/*|/tmp/*|/private/tmp/*|/var/folders/*|/private/var/folders/*)
+      warn "$JEV_DIR looks like a temporary directory"
+      warn "hooks are registered by absolute path and stop working when it is deleted;"
+      warn "copy the skill into a skills directory first (bin/install.js or install-skill.sh) and run install.sh from there"
+      ;;
+  esac
+}
+
 case "${1:-install}" in
   install|--check|--remove) ;;
   *) warn "unknown argument: $1"; exit 1 ;;
@@ -64,8 +87,8 @@ case "${1:-install}" in
     cp "$HOOKS" "$BACKUP"
     tmp="$(mktemp)"
     jq 'del(.jev)' "$HOOKS" > "$tmp" && mv "$tmp" "$HOOKS"
-    rm -f "$BIN_DIR/jev-slim"
     ok "hooks removed (backup: $BACKUP)"
+    ok "$BIN_DIR/jev-slim left in place for the other agents; ./install.sh all --remove deletes it"
     exit 0
     ;;
 
@@ -75,6 +98,7 @@ esac
 
 # ── Install ──────────────────────────────────────────────────────────
 say "Installing Jev hooks into $HOOKS"
+warn_if_temporary
 BACKUP="$HOOKS.bak-$(date +%Y%m%d-%H%M%S)"
 cp "$HOOKS" "$BACKUP"
 
@@ -89,8 +113,10 @@ jq --arg cmd "$HOOK_CMD" --arg matcher "$MATCHER" '
     PreInvocation: [
       { type: "command", command: $cmd, timeout: 10 }
     ],
+    # Triage only reads failures of the same tools the guard watches; a
+    # wildcard here would spawn node after every browser and search call too.
     PostToolUse: [
-      { matcher: "*",
+      { matcher: $matcher,
         hooks: [ { type: "command", command: $cmd, timeout: 10 } ] }
     ],
     Stop: [
@@ -103,7 +129,7 @@ jq empty "$tmp" || { warn "refusing to write invalid JSON; hooks untouched"; rm 
 mv "$tmp" "$HOOKS"
 ok "PreToolUse registered for: $MATCHER (guard, git safety, command slimming)"
 ok "PreInvocation registered (context carry-forward and thrashing gate)"
-ok "PostToolUse registered (error triage)"
+ok "PostToolUse registered for the same tools (error triage)"
 ok "Stop registered (definition of done verification gate)"
 
 mkdir -p "$BIN_DIR"
@@ -126,9 +152,14 @@ if [ -z "${TYPESAFE_API_KEY:-}" ]; then
   warn "TYPESAFE_API_KEY is not set — remote judgments are disabled; deterministic guard checks remain active"
   cat <<'NOTE'
 
-    Put it somewhere Antigravity will inherit it, e.g. ~/.zshrc.local:
+    Export it from your secret manager where the agent process will inherit it.
+    A terminal launch reads your shell rc (~/.zshrc, ~/.bashrc); a GUI launch
+    does not, so publish it to the login session as well. On macOS:
 
-      export TYPESAFE_API_KEY="$(op read 'op://Private/TYPESAFE_API_KEY/credential')"
+      launchctl setenv TYPESAFE_API_KEY "$(<secret-manager> read <item>)"
+
+    then quit and relaunch the app. A hook that logs `reason: "no api key"`
+    is running without it.
 
 NOTE
 else

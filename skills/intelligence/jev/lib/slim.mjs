@@ -43,18 +43,23 @@ const DETAIL_LEVELS = [
 // ── Deterministic pre-pass ───────────────────────────────────────────
 
 const ANSI = /\u001b\[[0-9;?]*[ -/]*[@-~]/g;
-// Progress/spinner redraws: carriage-return churn, percent bars, download ticks.
-const PROGRESS = /^[\s]*[⠀-⣿─-╿|/\\\-*.]+\s*$|^\s*\d{1,3}%\s|\r/;
-
-/** Strip control noise and collapse runs of identical lines. Pure, lossy only of redraw churn. */
+/**
+ * Strip control noise and collapse runs of identical lines. Pure, lossy
+ * only of redraw churn: a carriage return in the middle of a line moves
+ * the terminal cursor back to the start, so only the text after the last
+ * one was ever visible. Nothing is dropped by content — a spinner or a
+ * "100% tests passed" line is kept, because guessing which percent lines
+ * are progress bars is exactly how a summary line gets lost.
+ */
 export function denoise(text) {
   const lines = text.replace(ANSI, "").split("\n");
   const out = [];
   let run = null;
   let runCount = 0;
   for (const raw of lines) {
-    const line = raw.replace(/\s+$/, "");
-    if (PROGRESS.test(raw) && !raw.trim()) continue;
+    const settled = raw.replace(/\r+$/, "");
+    const rendered = settled.includes("\r") ? settled.slice(settled.lastIndexOf("\r") + 1) : settled;
+    const line = rendered.replace(/\s+$/, "");
     if (line === run) {
       runCount++;
       continue;
@@ -101,7 +106,10 @@ export function renderBlocks(blocks) {
 // ── The judgments ────────────────────────────────────────────────────
 
 export function slimQuestions(blocks, task, command) {
-  const blockIds = Object.fromEntries(blocks.map((b) => [b.id, null]));
+  // Built fresh for each question that needs it. Sharing one object between
+  // two questions is valid JSON but looks like a cycle to a naive redactor,
+  // and a criteria map that arrives as "[REDACTED]" is a 422 on every call.
+  const blockIds = () => Object.fromEntries(blocks.map((b) => [b.id, null]));
   return {
     shape: choice(
       "What kind of output is `output`? Judge by its own content, not by the command that produced it.",
@@ -127,13 +135,13 @@ export function slimQuestions(blocks, task, command) {
     ),
     relevance: choice(
       `Which block of \`output\` is most important to keep for someone working on \`task\`? The command that produced it was \`command\`.`,
-      blockIds,
+      blockIds(),
     ),
     ...(blocks.length > 1
       ? {
           second_relevance: choice(
             `Setting aside the single most important block, which block of \`output\` carries the next most important information for \`task\`?`,
-            blockIds,
+            blockIds(),
           ),
         }
       : {}),

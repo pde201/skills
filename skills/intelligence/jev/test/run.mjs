@@ -8,7 +8,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -23,7 +23,8 @@ process.env.JEV_STATE_DIR = mkdtempSync(join(tmpdir(), "jev-test-"));
 delete process.env.TYPESAFE_API_KEY;
 
 const { denoise, toBlocks, stitch, selectBlocks, slim } = await import("../lib/slim.mjs");
-const { shouldWrap, rewrite, shellQuote } = await import("../lib/wrap.mjs");
+const wrapModule = await import("../lib/wrap.mjs");
+const { shouldWrap, rewrite, shellQuote } = wrapModule;
 const { deterministicCheck, guard, decide, guardQuestions, namesAPath, ALLOW, ASK, DENY } = await import("../lib/guard.mjs");
 const { harvest, composeBrief } = await import("../lib/carryforward.mjs");
 const fixtures = await import("./fixtures.mjs");
@@ -40,6 +41,17 @@ test("denoise collapses repeated lines and strips ansi", () => {
 test("denoise is lossless for ordinary text", () => {
   const text = "alpha\nbeta\ngamma";
   assert.equal(denoise(text), text);
+});
+
+test("denoise keeps the last redraw of a carriage-return line and never drops lines by content", () => {
+  const churn = ["progress 10%\rprogress 50%\rprogress 100%", "done\r", "⠋ installing", " 45% |████     | 12/27", "100% tests passed, 0 tests failed"].join("\n");
+  assert.deepEqual(denoise(churn).split("\n"), [
+    "progress 100%",
+    "done",
+    "⠋ installing",
+    " 45% |████     | 12/27",
+    "100% tests passed, 0 tests failed",
+  ]);
 });
 
 // ── blocks ───────────────────────────────────────────────────────────
@@ -240,6 +252,39 @@ test("wrapping is idempotent", () => {
   assert.equal(shouldWrap(once).wrap, false);
 });
 
+test("git, gh, grep and ls are no longer wrapped by default; other bloat sources still are", () => {
+  // 53 of 59 wrapped commands on real sessions, and not one of them slimmed.
+  for (const command of ["git status", "git log --oneline", "gh pr list", "grep -rn foo src", "ls -la"]) {
+    assert.deepEqual(shouldWrap(command), { wrap: false, why: "not a known bloat source" }, command);
+  }
+  for (const command of ["rg foo", "find . -name '*.ts'", "npm test", "kubectl get pods"]) {
+    assert.equal(shouldWrap(command).wrap, true, command);
+  }
+});
+
+test("the task travels in a private per-session file, not inline", () => {
+  const { stashTask, dropTask } = wrapModule;
+  const first = rewrite("npm test", "fix the build", { key: "session-a" });
+  const path = first.match(/--task-file '([^']+)'/)?.[1];
+  assert.ok(path, "the rewrite must reference a task file");
+  assert.equal(readFileSync(path, "utf8"), "fix the build");
+  assert.equal((statSync(path).mode & 0o777), 0o600);
+  assert.ok(!first.includes("--task-b64"), "no inline base64");
+
+  // Same session, new request: the same file is overwritten, not a new one.
+  const second = rewrite("npm test", "now fix the tests", { key: "session-a" });
+  assert.equal(second.match(/--task-file '([^']+)'/)?.[1], path);
+  assert.equal(readFileSync(path, "utf8"), "now fix the tests");
+
+  // No session id: content-addressed, so identical tasks share one file.
+  assert.equal(stashTask("same task"), stashTask("same task"));
+  assert.notEqual(stashTask("same task"), path);
+
+  dropTask("session-a");
+  assert.equal(existsSync(path), false, "a host that announces session end can clean up");
+  assert.ok(rewrite("npm test", "").endsWith(`-- 'npm test'`), "no task, no task argument");
+});
+
 test("shellQuote survives a round trip through the shell", () => {
   for (const nasty of [`it's "quoted"`, "a $VAR `cmd` \\ b", "semi; colon && amp", "new\nline"]) {
     const echoed = execFileSync("/bin/bash", ["-c", `printf %s ${shellQuote(nasty)}`]).toString();
@@ -247,12 +292,14 @@ test("shellQuote survives a round trip through the shell", () => {
   }
 });
 
-test("a rewritten command still runs the original", () => {
-  const rewritten = rewrite(`printf '%s\\n' "it's fine"`, "");
+test("a rewritten command still runs the original, multi-byte output included", () => {
+  // Box-drawing and check marks are what build tools print; a wrapper that
+  // joined stdout chunks as strings turned them into replacement characters.
+  const rewritten = rewrite(`printf '%s\\n' "─ it's fine ✓ — naïve"`, "");
   const out = execFileSync("/bin/bash", ["-c", rewritten], {
     env: { ...process.env, JEV_HOOKS: "1" },
   }).toString();
-  assert.equal(out.trim(), "it's fine");
+  assert.equal(out.trim(), "─ it's fine ✓ — naïve");
 });
 
 test("a wrapped command that fails keeps its exit code and its whole output", () => {
@@ -392,14 +439,92 @@ test("claude: PreToolUse asks on force push to main", () => {
   assert.match(result.hookSpecificOutput.permissionDecisionReason, /force push/i);
 });
 
-test("claude: PostToolUse triages error without failing", () => {
+const logPath = () => join(process.env.JEV_STATE_DIR, "jev-log.jsonl");
+const logRecordsSince = (count) =>
+  readFileSync(logPath(), "utf8").trim().split("\n").slice(count).filter(Boolean).map((line) => JSON.parse(line));
+const logCount = () => (existsSync(logPath()) ? readFileSync(logPath(), "utf8").trim().split("\n").filter(Boolean).length : 0);
+
+test("claude: PostToolUseFailure triages the error and attributes it to claude", () => {
+  // Claude Code's PostToolUse fires only on success and carries no error;
+  // the failure event is PostToolUseFailure with `error`, as its docs say.
+  const before = logCount();
+  const result = runHook({
+    hook_event_name: "PostToolUseFailure",
+    tool_name: "Bash",
+    tool_input: { command: "npm test" },
+    error: "Exit code 127\nsh: vitest: command not found",
+    is_interrupt: false,
+  });
+  assert.equal(result, null);
+  const triage = logRecordsSince(before).find((r) => r.triage);
+  assert.ok(triage, "a triage record must be written");
+  assert.equal(triage.agent, "claude");
+  assert.equal(triage.triage, "missing_dependency");
+});
+
+test("claude: PostToolUse carries a tool_response, not an error, and triages nothing", () => {
+  const before = logCount();
   const result = runHook({
     hook_event_name: "PostToolUse",
     tool_name: "Bash",
     tool_input: { command: "npm test" },
-    error: "exit status 1",
+    tool_response: { stdout: "ok", stderr: "", interrupted: false },
   });
   assert.equal(result, null);
+  assert.equal(logRecordsSince(before).filter((r) => r.triage).length, 0);
+});
+
+test("claude: JEV_HOOKS_SUPERVISION=0 switches error triage off", () => {
+  const before = logCount();
+  runHook(
+    { hook_event_name: "PostToolUseFailure", tool_name: "Bash", tool_input: { command: "npm test" }, error: "Exit code 1" },
+    { JEV_HOOKS_SUPERVISION: "0" },
+  );
+  assert.equal(logRecordsSince(before).filter((r) => r.triage).length, 0);
+});
+
+function thrashingTranscript() {
+  const dir = mkdtempSync(join(tmpdir(), "jev-thrash-claude-"));
+  const path = join(dir, "transcript.jsonl");
+  const lines = [{ type: "user", message: { role: "user", content: "Make the build pass." } }];
+  for (let i = 0; i < 3; i++) {
+    lines.push({
+      type: "assistant",
+      message: { role: "assistant", content: [{ type: "tool_use", id: `t${i}`, name: "Bash", input: { command: "npm run build" } }] },
+    });
+    lines.push({
+      type: "user",
+      message: { role: "user", content: [{ type: "tool_result", tool_use_id: `t${i}`, is_error: true, content: [{ type: "text", text: "error TS2304" }] }] },
+    });
+  }
+  writeFileSync(path, lines.map((l) => JSON.stringify(l)).join("\n"));
+  return path;
+}
+
+test("claude: a thrashing warning reaches the model as additionalContext, not as a user notice", () => {
+  const result = runHook({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "echo hi" },
+    cwd: process.cwd(),
+    transcript_path: thrashingTranscript(),
+  });
+  assert.match(result.hookSpecificOutput.additionalContext, /Jev Supervision/);
+  assert.equal(result.hookSpecificOutput.hookEventName, "PreToolUse");
+  assert.equal(result.systemMessage, undefined, "systemMessage is shown to the user, not the model");
+  assert.equal(result.hookSpecificOutput.permissionDecision, undefined);
+});
+
+test("claude: a thrashing warning rides along with a slimming rewrite", () => {
+  const result = runHook({
+    hook_event_name: "PreToolUse",
+    tool_name: "Bash",
+    tool_input: { command: "npm run build" },
+    cwd: process.cwd(),
+    transcript_path: thrashingTranscript(),
+  });
+  assert.match(result.hookSpecificOutput.updatedInput.command, /jev-slim\.mjs/);
+  assert.match(result.hookSpecificOutput.additionalContext, /Jev Supervision/);
 });
 
 test("an unknown event is ignored", () => {
@@ -584,10 +709,12 @@ test("codex: the stashed prompt becomes the task the slimmer is given", () => {
     session_id: session,
     cwd: process.cwd(),
   });
-  const b64 = Buffer.from(prompt, "utf8").toString("base64");
+  const match = result.hookSpecificOutput.updatedInput.command.match(/--task-file '([^']+)'/);
+  assert.ok(match, "the rewritten command must point at a task file");
+  assert.equal(readFileSync(match[1], "utf8"), prompt, "and that file must hold the stashed request");
   assert.ok(
-    result.hookSpecificOutput.updatedInput.command.includes(b64),
-    "the rewritten command must carry the stashed request",
+    !result.hookSpecificOutput.updatedInput.command.includes(Buffer.from(prompt, "utf8").toString("base64")),
+    "the request no longer travels inline as base64",
   );
 });
 
@@ -635,14 +762,24 @@ test("codex: PreToolUse asks on force push to main", () => {
   assert.match(result.hookSpecificOutput.permissionDecisionReason, /force push/i);
 });
 
-test("codex: PostToolUse triages error without failing", () => {
+test("codex: PostToolUse triages error without failing, and the record says codex", () => {
+  const before = logCount();
   const result = runCodex({
     hook_event_name: "PostToolUse",
     tool_name: "Bash",
     tool_input: { command: "npm test" },
-    error: "exit status 1",
+    error: "Exit code 1\nAssertionError: expected 1 to be 2",
   });
   assert.equal(result, null);
+  const triage = logRecordsSince(before).find((r) => r.triage);
+  assert.equal(triage?.agent, "codex", "triage used to be logged as antigravity whoever asked");
+  assert.equal(triage?.triage, "test_assertion");
+});
+
+test("codex: PostToolUseFailure is accepted under that name too", () => {
+  const before = logCount();
+  assert.equal(runCodex({ hook_event_name: "PostToolUseFailure", tool_name: "Bash", tool_input: { command: "x" }, error: "Exit code 1\nEACCES" }), null);
+  assert.equal(logRecordsSince(before).find((r) => r.triage)?.triage, "permission_or_path");
 });
 
 test("codex: SessionEnd evaluates DoD and cleans up without failing", () => {
@@ -781,6 +918,53 @@ test("supervision: checkGoalDriftAndThrashing alerts on consecutive failures", a
   assert.match(res.warning, /consecutive tool failures/);
 });
 
+test("supervision: distinct successful edits to one file are not a loop, and identical successes are not either", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-not-thrash-"));
+  const call = (id, name, input) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+  const result = (id, ok, text = "ok") => ({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, is_error: !ok, content: [{ type: "text", text }] }] } });
+  const write = (name, lines) => {
+    const path = join(dir, name);
+    writeFileSync(path, lines.map((l) => JSON.stringify(l)).join("\n"));
+    return path;
+  };
+  const request = { type: "user", message: { role: "user", content: "Tighten the docs." } };
+
+  // Four edits to the same file, each replacing different text — the shape of
+  // ordinary documentation work, which used to read as one call made four times.
+  const distinctEdits = write("edits.jsonl", [request,
+    ...[0, 1, 2, 3].flatMap((i) => [call(`e${i}`, "Edit", { file_path: "/docs/SKILL.md", old_string: `paragraph ${i}`, new_string: `better ${i}` }), result(`e${i}`, true)]),
+  ]);
+  assert.equal((await checkGoalDriftAndThrashing({ transcriptPath: distinctEdits })).warning, null);
+
+  // The very same command, four times, all succeeding: repetition without failure is not thrashing.
+  const sameSuccess = write("same.jsonl", [request,
+    ...[0, 1, 2, 3].flatMap((i) => [call(`s${i}`, "Bash", { command: "git status" }), result(`s${i}`, true)]),
+  ]);
+  assert.equal((await checkGoalDriftAndThrashing({ transcriptPath: sameSuccess })).warning, null);
+
+  // The same failing edit three times is still a loop.
+  const sameFailing = write("failing.jsonl", [request,
+    ...[0, 1, 2].flatMap((i) => [call(`f${i}`, "Edit", { file_path: "/docs/SKILL.md", old_string: "gone", new_string: "x" }), result(`f${i}`, false, "old_string not found")]),
+  ]);
+  assert.match((await checkGoalDriftAndThrashing({ transcriptPath: sameFailing })).warning, /consecutive tool failures/);
+});
+
+test("recentToolCalls carries an edit's replaced text and a write's size as detail", async () => {
+  const { recentToolCalls } = await import("../lib/transcript.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "jev-detail-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, [
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "e", name: "Edit", input: { file_path: "/a.ts", old_string: "const  x =\n 1", new_string: "y" } }] } },
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "w", name: "Write", input: { file_path: "/b.ts", content: "hello" } }] } },
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "b", name: "Bash", input: { command: "ls" } }] } },
+  ].map((l) => JSON.stringify(l)).join("\n"));
+  const [edit, write, bash] = recentToolCalls(path);
+  assert.equal(edit.input, "/a.ts", "the path summary is unchanged for callers that read it as a path");
+  assert.equal(edit.detail, "replaces: const x = 1");
+  assert.equal(write.detail, "writes 5 chars");
+  assert.equal(bash.detail, undefined);
+});
+
 test("supervision: triageToolError categorizes common failures deterministically", async () => {
   const syntax = await triageToolError({ toolName: "run_command", error: "SyntaxError: Unexpected token {" });
   assert.equal(syntax.category, "syntax_compile");
@@ -859,6 +1043,51 @@ test("antigravity: Stop hook blocks completion when changes lack verification", 
   assert.equal(runAgy(stopEvent, { JEV_DOD_GATE: "0" }), null);
 });
 
+test("antigravity: the Stop gate sends a conversation back a bounded number of times, then stands down", () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "agy-stop-loop-"));
+  const transcriptPath = join(tmpDir, "edited.jsonl");
+  writeFileSync(transcriptPath, JSON.stringify({
+    source: "MODEL",
+    type: "GENERIC",
+    tool_calls: [{ name: "write_to_file", args: { TargetFile: "/a/b.ts" } }],
+  }) + "\n");
+  const stopEvent = { executionNum: 1, terminationReason: "model_stop", transcriptPath, conversationId: "loop-guard-test" };
+  const env = { JEV_DOD_MAX_CONTINUES: "2" };
+
+  const first = runAgy(stopEvent, env);
+  assert.equal(first?.decision, "continue");
+  assert.match(first.reason, /stop asking after 2 attempts/);
+  assert.equal(runAgy(stopEvent, env)?.decision, "continue", "second refusal");
+
+  const before = logCount();
+  assert.equal(runAgy(stopEvent, env), null, "third stop: the gate stands down rather than loop forever");
+  const gaveUp = logRecordsSince(before).find((r) => r.hook === "Stop" && r.gaveUp);
+  assert.ok(gaveUp, "standing down is recorded, not silent");
+  assert.equal(gaveUp.continues, 2);
+
+  // The counter was cleared, so a later unverified stop is gated afresh.
+  assert.equal(runAgy(stopEvent, env)?.decision, "continue");
+});
+
+test("antigravity: a verified stop clears the Stop gate counter", () => {
+  const tmpDir = mkdtempSync(join(tmpdir(), "agy-stop-clear-"));
+  const unverified = join(tmpDir, "unverified.jsonl");
+  writeFileSync(unverified, JSON.stringify({
+    source: "MODEL", type: "GENERIC", tool_calls: [{ name: "write_to_file", args: { TargetFile: "/a/b.ts" } }],
+  }) + "\n");
+  const verified = join(tmpDir, "verified.jsonl");
+  writeFileSync(verified, [
+    { source: "MODEL", type: "GENERIC", tool_calls: [{ name: "write_to_file", args: { TargetFile: "/a/b.ts" } }] },
+    { source: "MODEL", type: "GENERIC", tool_calls: [{ name: "run_command", args: { CommandLine: "npm test" } }] },
+  ].map((l) => JSON.stringify(l)).join("\n") + "\n");
+  const key = { conversationId: "clear-test", executionNum: 1, terminationReason: "model_stop" };
+
+  assert.equal(runAgy({ ...key, transcriptPath: unverified }, { JEV_DOD_MAX_CONTINUES: "1" })?.decision, "continue");
+  assert.equal(runAgy({ ...key, transcriptPath: verified }, { JEV_DOD_MAX_CONTINUES: "1" }), null, "tests ran: allowed");
+  // Had the counter survived, this would already be past the limit and pass silently.
+  assert.equal(runAgy({ ...key, transcriptPath: unverified }, { JEV_DOD_MAX_CONTINUES: "1" })?.decision, "continue");
+});
+
 test("antigravity: PostToolUse responds with empty object", () => {
   const postEvent = { stepIdx: 4, error: "exit status 1" };
   assert.deepEqual(runAgy(postEvent), {});
@@ -909,7 +1138,7 @@ test("translate maps what it is sure of and hands the rest over untouched", () =
     args: { TargetFile: "/a/b.ts", TargetContent: "old", ReplacementContent: "new" },
   }), {
     toolName: "Edit",
-    input: { file_path: "/a/b.ts", old_string: "old", new_string: "new", allow_multiple: undefined },
+    input: { file_path: "/a/b.ts", old_string: "old", new_string: "new", replace_all: undefined },
   });
   assert.deepEqual(translate({
     name: "write_to_file",
@@ -968,6 +1197,78 @@ test("a call that does name a path is asked about it as before", () => {
   assert.ok("invented_target" in asked);
 });
 
+// ── what counts as the workspace ─────────────────────────────────────
+//
+// `wrong_scope` judged against `cwd` alone read a sibling checkout, a
+// scratch directory and a skill under ~/.claude as "outside the project":
+// 33 of 57 asks on real sessions, none of them a hazard. The workspace is
+// wider than the cwd, and for a file tool it is knowable from the path.
+
+const { workspaceRoots, insideWorkspace, targetPaths } = await import("../lib/guard.mjs");
+const { writtenDirs } = await import("../lib/transcript.mjs");
+const { tmpdir: osTmpdir, homedir: osHomedir } = await import("node:os");
+
+test("the workspace is the cwd, the host's folders, directories already written to, and temp", () => {
+  const scratch = join(osHomedir(), "scratch", "skill", "lib");
+  const roots = workspaceRoots({ cwd: "/srv/app", hostRoots: ["/srv/shared/"], writtenDirs: [scratch] });
+  for (const expected of ["/srv/app", "/srv/shared", scratch, osTmpdir().replace(/\/+$/, ""), "/tmp", "/private/tmp"]) {
+    assert.ok(roots.includes(expected), `${expected} should be a root`);
+  }
+});
+
+test("insideWorkspace respects directory boundaries, ~, relative paths and /private aliases", () => {
+  const scratch = join(osHomedir(), "scratch", "skill", "lib");
+  const roots = workspaceRoots({ cwd: "/srv/app", writtenDirs: [scratch] });
+  assert.equal(insideWorkspace("/srv/app/src/x.ts", roots), true);
+  assert.equal(insideWorkspace("/srv/app", roots), true, "the root itself");
+  assert.equal(insideWorkspace("/srv/application/x.ts", roots), false, "a sibling that merely shares a prefix");
+  assert.equal(insideWorkspace("src/x.ts", roots, "/srv/app"), true, "relative to the cwd");
+  assert.equal(insideWorkspace("~/scratch/skill/lib/a.mjs", roots), true, "~ expands");
+  assert.equal(insideWorkspace("/private/tmp/build/out.txt", roots), true, "macOS spells /tmp two ways");
+  assert.equal(insideWorkspace("/etc/hosts", roots), false);
+  assert.equal(insideWorkspace(join(osHomedir(), ".zshrc"), roots), false);
+});
+
+test("targetPaths knows which files a call would change", () => {
+  assert.deepEqual(targetPaths("Edit", { file_path: "/a/b.ts", old_string: "x", new_string: "y" }), ["/a/b.ts"]);
+  assert.deepEqual(targetPaths("NotebookEdit", { notebook_path: "/a/n.ipynb" }), ["/a/n.ipynb"]);
+  assert.deepEqual(
+    targetPaths("apply_patch", { patch: "*** Begin Patch\n*** Update File: src/a.ts\n@@\n-x\n+y\n*** Add File: src/b.ts\n+z\n*** Delete File: old.ts\n*** End Patch" }),
+    ["src/a.ts", "src/b.ts", "old.ts"],
+  );
+  assert.deepEqual(targetPaths("Bash", { command: "cp a /etc/b" }), [], "a shell command's reach is not knowable from a path");
+  assert.deepEqual(targetPaths("Edit", {}), []);
+});
+
+test("wrong_scope is not asked about a file change inside the workspace, and always asked about a shell command", () => {
+  const scratch = join(osHomedir(), "scratch", "skill", "lib");
+  const roots = workspaceRoots({ cwd: "/srv/app", writtenDirs: [scratch] });
+  const call = (toolName, input) => ({ toolName, input, cwd: "/srv/app" });
+
+  assert.ok(!("wrong_scope" in guardQuestions(call("Edit", { file_path: "/srv/app/src/a.ts" }), roots)), "inside the cwd");
+  assert.ok(!("wrong_scope" in guardQuestions(call("Write", { file_path: join(scratch, "b.mjs") }), roots)), "inside a directory this session already wrote to");
+  assert.ok(!("wrong_scope" in guardQuestions(call("apply_patch", { patch: "*** Update File: src/a.ts\n" }), roots)), "a patch that stays inside the cwd");
+  assert.ok("wrong_scope" in guardQuestions(call("Edit", { file_path: join(osHomedir(), ".zshrc") }), roots), "outside: the model decides, with the task in hand");
+  assert.ok("wrong_scope" in guardQuestions(call("apply_patch", { patch: "*** Update File: src/a.ts\n*** Add File: /etc/motd\n" }), roots), "one target outside is enough to ask");
+  assert.ok("wrong_scope" in guardQuestions(call("Bash", { command: "cp a /srv/app/b" }), roots), "a shell command can reach anywhere");
+  assert.ok("wrong_scope" in guardQuestions(call("Edit", { file_path: "/srv/app/src/a.ts" })), "without roots the question is always asked, as before");
+  assert.ok("intent_mismatch" in guardQuestions(call("Edit", { file_path: "/srv/app/src/a.ts" }), roots), "only scope is skipped");
+});
+
+test("writtenDirs collects the directories of successful file writes only", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-written-"));
+  const path = join(dir, "transcript.jsonl");
+  const call = (id, name, input) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+  const result = (id, ok) => ({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, is_error: !ok, content: [{ type: "text", text: ok ? "ok" : "denied" }] }] } });
+  writeFileSync(path, [
+    call("e1", "Edit", { file_path: "/a/b/c.ts", old_string: "x", new_string: "y" }), result("e1", true),
+    call("w1", "Write", { file_path: "/a/b/d.ts", content: "" }), result("w1", true),
+    call("w2", "Write", { file_path: "/x/y.ts", content: "" }), result("w2", false),
+    call("r1", "Read", { file_path: "/q/r.ts" }), result("r1", true),
+  ].map((l) => JSON.stringify(l)).join("\n"));
+  assert.deepEqual(writtenDirs(path), ["/a/b"]);
+});
+
 test("guardQuestions with no call still returns every question", () => {
   // The signature gained a parameter; callers that predate it must be
   // unaffected rather than quietly losing a hazard.
@@ -1020,4 +1321,143 @@ test("the gate applies only to reads — a change is judged as before", () => {
   assert.equal(decide({ intent_mismatch: 0.57 }, reach(1.06)).decision, ASK);
   assert.equal(decide({ invented_target: 0.77 }, reach(1.5)).decision, ASK);
   assert.equal(decide({ destructive_unrequested: 0.9 }, reach(2)).decision, DENY);
+});
+
+// ── regressions from the 2026-09-21 review ───────────────────────────
+
+test("catastrophic patterns cover --no-preserve-root and -f, and spare the safe force spellings", () => {
+  for (const command of [
+    "rm -rf --no-preserve-root /",
+    "sudo rm -rf / --no-preserve-root",
+    "rm -rf /*",
+    "git push -f origin feature/x",
+  ]) {
+    assert.equal(deterministicCheck("Bash", { command }, "/tmp")?.decision, ASK, command);
+  }
+  for (const command of [
+    "git push --force-with-lease origin main",
+    "git push --force-if-includes origin main",
+    "rm -rf /tmp/build",
+  ]) {
+    assert.equal(deterministicCheck("Bash", { command }, "/tmp"), null, command);
+  }
+});
+
+test("supervision: git safety spares --force-with-lease and flags -f to main", () => {
+  assert.equal(checkGitSafety({ command: "git push --force-with-lease origin main" }), null);
+  assert.equal(checkGitSafety({ command: "git push origin main --force-with-lease" }), null);
+  assert.equal(checkGitSafety({ command: "git push -f origin main" })?.decision, "ask");
+});
+
+test("supervision: a staged .env asks, .env.example does not, and -a sees unstaged tracked changes", () => {
+  const repo = mkdtempSync(join(tmpdir(), "jev-git-"));
+  // Isolated from the developer's global git config: a global excludes file
+  // that ignores .env (common) would otherwise refuse the add below.
+  const gitEnv = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", HOME: repo };
+  const git = (...args) => execFileSync("git", ["-c", "commit.gpgsign=false", ...args], { cwd: repo, stdio: "pipe", env: gitEnv });
+  git("init", "-q");
+  git("config", "user.email", "t@example.com");
+  git("config", "user.name", "t");
+  writeFileSync(join(repo, ".env.example"), "KEY=\n");
+  writeFileSync(join(repo, ".env"), "KEY=real\n");
+
+  git("add", ".env.example");
+  assert.equal(checkGitSafety({ command: "git commit -m x", cwd: repo }), null, "a template is meant to be committed");
+
+  git("add", "-f", ".env");
+  assert.equal(checkGitSafety({ command: "git commit -m x", cwd: repo })?.decision, "ask");
+
+  git("commit", "-q", "-m", "seed");
+  writeFileSync(join(repo, ".env"), "KEY=changed\n");
+  assert.equal(checkGitSafety({ command: "git commit -m x", cwd: repo }), null, "an unstaged change is not committed by a plain commit");
+  assert.equal(checkGitSafety({ command: "git commit -am x", cwd: repo })?.decision, "ask", "-a stages it at commit time");
+});
+
+test("supervision: the DoD gate recognises Claude Code and Codex edit tools", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-dod-names-"));
+  const write = (name, lines) => {
+    const path = join(dir, name);
+    writeFileSync(path, lines.map((l) => JSON.stringify(l)).join("\n"));
+    return path;
+  };
+  const call = (id, name, input) => ({ type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id, name, input }] } });
+  const done = (id) => ({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: [{ type: "text", text: "ok" }] }] } });
+
+  const claudeEdit = write("claude.jsonl", [call("e1", "Edit", { file_path: "/a/b.ts" }), done("e1")]);
+  assert.equal((await checkDefinitionOfDone({ transcriptPath: claudeEdit })).allow, false, "an Edit with no test afterwards");
+
+  const codexPatch = write("codex.jsonl", [call("p1", "apply_patch", { patch: "*** Begin Patch" }), done("p1")]);
+  assert.equal((await checkDefinitionOfDone({ transcriptPath: codexPatch })).allow, false, "an apply_patch with no test afterwards");
+
+  const tested = write("tested.jsonl", [
+    call("e1", "Edit", { file_path: "/a/b.ts" }), done("e1"),
+    call("t1", "Bash", { command: "npm test" }), done("t1"),
+  ]);
+  assert.equal((await checkDefinitionOfDone({ transcriptPath: tested })).allow, true);
+});
+
+test("antigravity: AllowMultiple maps to replace_all, so a repeated target is not a false deny", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-agy-multi-"));
+  const file = join(dir, "c.txt");
+  writeFileSync(file, "x = 1\nx = 1\n");
+  const denied = runAgy(agyCall("replace_file_content", { TargetFile: file, TargetContent: "x = 1", ReplacementContent: "x = 2" }));
+  assert.equal(denied.decision, "deny");
+  assert.match(denied.reason, /appears 2 times/);
+  const allowed = runAgy(agyCall("replace_file_content", { TargetFile: file, TargetContent: "x = 1", ReplacementContent: "x = 2", AllowMultiple: true }));
+  assert.equal(allowed, null, "the user asked for every occurrence; nothing to deny");
+});
+
+test("a Read is judged by code alone: ordinary files pass with no model call, credential-shaped paths ask", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-read-guard-"));
+  const env = { TYPESAFE_API_KEY: "test-key-that-must-never-be-sent" };
+  const envFile = join(dir, ".env");
+  const template = join(dir, ".env.example");
+  const pem = join(dir, "server.pem");
+  for (const f of [envFile, template, pem]) writeFileSync(f, "x\n");
+
+  let before = logCount();
+  assert.equal(runHook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: join(ROOT, "package.json") } }, env), null);
+  let record = logRecordsSince(before).find((r) => r.tool === "Read");
+  assert.equal(record.by, "code");
+  assert.match(record.reason, /deterministic checks only/, "a fake key was set, so any model call would have failed loudly instead");
+
+  for (const path of [envFile, pem]) {
+    const result = runHook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: path } }, env);
+    assert.equal(result.hookSpecificOutput.permissionDecision, "ask", path);
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /usually holds credentials/);
+  }
+  assert.equal(runHook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: template } }, env), null, "a template is not a credential");
+
+  // Antigravity's view_file maps to Read and gets the same treatment.
+  assert.equal(runAgy(agyCall("view_file", { AbsolutePath: envFile }), env)?.decision, "ask");
+
+  // The model path is still there for anyone who wants it back.
+  before = logCount();
+  runHook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: join(ROOT, "package.json") } }, { JEV_GUARD_READ_MODEL: "1" });
+  record = logRecordsSince(before).find((r) => r.tool === "Read");
+  assert.equal(record.reason, "no api key", "with the switch on and no key, the model path was attempted");
+});
+
+const { latestUserRequest, stripInjectedBlocks } = await import("../lib/transcript.mjs");
+
+test("latestUserRequest drops host-injected blocks and keeps what the user typed", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-injected-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, [
+    {
+      type: "user",
+      message: {
+        role: "user",
+        content: [
+          { type: "text", text: "<system-reminder>\nContents of CLAUDE.md, thousands of characters.\n</system-reminder>" },
+          { type: "text", text: "fix the flaky test" },
+        ],
+      },
+    },
+    { type: "user", message: { role: "user", content: "<bash-input>ls</bash-input><bash-stdout>a b</bash-stdout>" } },
+  ].map((l) => JSON.stringify(l)).join("\n"));
+  assert.equal(latestUserRequest(path), "fix the flaky test");
+  assert.equal(stripInjectedBlocks("question\n\n<system-reminder>x</system-reminder>"), "question");
+  assert.equal(stripInjectedBlocks("<task-notification>\nstill open"), "", "an unterminated injected block is not a request");
+  assert.equal(stripInjectedBlocks("<request>keep me</request>"), "<request>keep me</request>", "unknown tags are the user's own");
 });

@@ -7,6 +7,7 @@
 // ──────────────────────────────────────────────────────────────────────
 
 import { readFileSync, statSync } from "node:fs";
+import { dirname } from "node:path";
 
 const MAX_BYTES = 4_000_000;
 
@@ -42,13 +43,36 @@ const textOf = (content) => {
     .join("\n");
 };
 
+// Text a host injects into user turns that the human never typed: Claude
+// Code's system reminders and hook notifications, the desktop app's terminal
+// relays, slash-command wrappers. It is not a request, and it is exactly the
+// kind of bulk that a task string or a carry-forward brief must not carry.
+const INJECTED_TAGS = [
+  "system-reminder", "task-notification", "ci-monitor-event",
+  "bash-input", "bash-stdout", "bash-stderr",
+  "local-command-stdout", "local-command-stderr", "local-command-caveat",
+  "command-name", "command-message", "command-args",
+  "user-prompt-submit-hook", "ide_opened_file", "ide_selection",
+];
+const INJECTED_BLOCK = new RegExp(`<(${INJECTED_TAGS.join("|")})>[\\s\\S]*?</\\1>`, "g");
+const INJECTED_OPENING = new RegExp(`^\\s*<(${INJECTED_TAGS.join("|")})>`);
+
+/** Remove host-injected blocks from a user turn, leaving what the human wrote. */
+export function stripInjectedBlocks(text) {
+  if (typeof text !== "string") return "";
+  const stripped = text.replace(INJECTED_BLOCK, "");
+  // An unterminated block (truncated turn) still starts with its tag.
+  return INJECTED_OPENING.test(stripped) ? "" : stripped.trim();
+}
+
 const extractUserText = (raw) => {
   if (!raw || typeof raw !== "string") return "";
   const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
   if (match) return match[1].trim();
+  const text = stripInjectedBlocks(raw);
   // Claude/Codex tool results arrive shaped as user turns; skip them
-  if (raw.startsWith("<") && !raw.startsWith("<USER_REQUEST>")) return "";
-  return raw.trim();
+  if (text.startsWith("<") && !text.startsWith("<USER_REQUEST>")) return "";
+  return text;
 };
 
 const isUserTurn = (entry) =>
@@ -81,7 +105,7 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
     if (Array.isArray(content)) {
       for (const part of content) {
         if (part?.type === "tool_use") {
-          calls.push({ tool: part.name, input: summarizeInput(part.input), failed: false, id: part.id });
+          calls.push({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), failed: false, id: part.id });
         } else if (part?.type === "tool_result") {
           const call = calls.find((c) => c.id === part.tool_use_id);
           if (call) {
@@ -97,7 +121,8 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
       for (const call of entry.tool_calls) {
         const id = call.id ?? String(entry.step_index ?? Math.random());
         const failed = Boolean(entry?.status === "ERROR" || call?.status === "ERROR" || call?.is_error || entry?.is_error);
-        calls.push({ tool: call.name, input: summarizeInput(call.args ?? call.input), failed, id });
+        const args = call.args ?? call.input;
+        calls.push({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), failed, id });
       }
     } else if (entry?.source === "MODEL" && entry?.type === "GENERIC" && calls.length > 0) {
       const lastCall = calls[calls.length - 1];
@@ -110,6 +135,22 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
   return calls.slice(-limit).map(({ id, ...rest }) => rest);
 }
 
+/**
+ * What distinguishes one call on a target from another on the same target:
+ * the text an edit replaces, or the size of the content a write lands. The
+ * `input` summary stays the path so callers that read it as one keep
+ * working; this rides alongside so four different edits to one file do not
+ * look like the same call made four times.
+ */
+function summarizeDetail(input) {
+  if (!input || typeof input !== "object") return undefined;
+  const replaced = input.old_string ?? input.TargetContent;
+  if (typeof replaced === "string") return `replaces: ${replaced.replace(/\s+/g, " ").trim().slice(0, 60)}`;
+  const written = input.content ?? input.CodeContent;
+  if (typeof written === "string") return `writes ${written.length} chars`;
+  return undefined;
+}
+
 function summarizeInput(input) {
   if (!input || typeof input !== "object") return String(input ?? "");
   if (typeof input.command === "string") return input.command.slice(0, 300);
@@ -120,6 +161,27 @@ function summarizeInput(input) {
   if (typeof input.pattern === "string") return input.pattern;
   if (typeof input.Pattern === "string") return input.Pattern;
   return JSON.stringify(input).slice(0, 300);
+}
+
+const FILE_WRITE_TOOLS = new Set([
+  "Edit", "Write", "NotebookEdit", "MultiEdit",                          // Claude Code, Codex aliases
+  "replace_file_content", "edit_file", "write_to_file", "create_file",   // Antigravity
+]);
+
+/**
+ * Directories this session has already changed files in, with the host's
+ * blessing (the call succeeded, so any permission prompt was answered).
+ * They are part of the workspace for scope judgments: a project's sibling
+ * checkout, a scratch directory, wherever the work actually is.
+ */
+export function writtenDirs(path) {
+  const dirs = new Set();
+  for (const call of recentToolCalls(path, { limit: 400 })) {
+    if (call.failed || !FILE_WRITE_TOOLS.has(call.tool)) continue;
+    // summarizeInput hands back file_path / TargetFile for these tools.
+    if (typeof call.input === "string" && /^(\/|~)/.test(call.input)) dirs.add(dirname(call.input));
+  }
+  return [...dirs].slice(0, 50);
 }
 
 /** Every file path this session has successfully touched — used to spot invented paths. */

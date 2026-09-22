@@ -11,6 +11,29 @@ Read `lib/config.mjs` for current defaults. Distinguish absent registration,
 untrusted hooks, unmatched tool names, disabled features, deterministic-only
 operation, and remote API failure. Missing credentials do not make hooks inert.
 
+A log full of `by: "code"` with `reason: "no api key"` while the key is set in
+your shell means the agent process did not inherit it. GUI-launched agents read
+the login session's environment, not shell rc files: publish the key there (on
+macOS `launchctl setenv`), then quit and relaunch the app. A process keeps the
+environment it started with, so rotating the key also needs a relaunch.
+
+A `jev-slim` record with `reason: "jev unavailable: TypeSafe 422 …"` is a
+request the API rejected as malformed. That is a bug in this layer, not a
+tuning problem; the outbound body is redacted before it is sent, so check that
+redaction has not altered the request's structure.
+
+`jev unavailable: TypeSafe request failed after N attempt(s): …` names what
+went wrong on the last attempt: `TypeSafe 503` is a provider outage, `fetch
+failed ENOTFOUND` is the network, `timed out after M ms per attempt` is
+latency. All three fail open, and the wrapped command still ran; the cost is
+the wait, up to `(JEV_RETRIES + 1) × JEV_TIMEOUT_MS` per judgment. After
+`JEV_BREAKER_FAILURES` such failures in a row the circuit opens and records
+read `jev unavailable: circuit open after N consecutive provider failures
+(last: …); retrying in S s` — no request is made and nothing waits. One
+trial goes out when `JEV_BREAKER_COOLDOWN_MS` has passed; a success closes
+the circuit, a failure re-opens it. Delete `<JEV_STATE_DIR>/breaker.json` to
+reset it by hand.
+
 ## Recover output
 
 Use the exact Jev footer path and inspect the needed range. If the file is gone,
@@ -30,6 +53,13 @@ Read-only calls suppress most model hazards, but credential exposure and repeat
 failure remain relevant. Deterministic checks run before model judgments.
 Unknown or malformed model responses must not silently trim output.
 
+A `wrong_scope` ask on a file edit means the target lay outside every
+workspace root: the cwd, the host's workspace folders, directories the session
+had already written to, the temp directory, and `JEV_WORKSPACE_ROOTS`. Inside
+them the question is not asked at all and `signals.not_asked` says so. If a
+directory you work in keeps drawing asks, add it to `JEV_WORKSPACE_ROOTS`
+rather than raising `JEV_GUARD_ASK_AT`, which lowers every hazard at once.
+
 ## Tune from evidence
 
 First label expected behavior and inspect applicability, then wording, then
@@ -38,6 +68,28 @@ separate from held-out evaluation; report denominators, uncertainty, model and
 question versions, and repeated-run variation. Five logs can reveal a bug but
 cannot establish a calibrated threshold. Use the eval protocol in `evals/`.
 
+Calibration evidence on record, one machine, 2026-09-21, 57 model asks: 38
+sat between 0.45 and 0.54, and 33 of those were `wrong_scope` on Edit or Write
+calls into a sibling checkout or scratch directory the session was already
+working in. That was the question's wording — it named `cwd` alone — and the
+fix was `workspace_roots`, after which the question is not asked for such
+edits at all. Raising `JEV_GUARD_ASK_AT` to 0.55 would have hidden the same
+asks while also lowering every other hazard, and it was reverted once the
+cause was fixed. Genuine detections in the same log sat well clear of the
+line: `wrong_scope` 0.61 on an edit to the agent's own settings file, and
+`intent_mismatch` 0.91–0.93 on edits that did not serve the stated request.
+The 0.45 default stands on that evidence; a tighter or looser value needs a
+labeled set of its own.
+
 Measure end-to-end latency, including retries and wrapper overhead. The timeout
 is per attempt; it is not a total hook deadline. Record p50/p95, cost, and
 critical-evidence retention rather than only average latency or fewer lines.
+
+A failed judgment waits `(JEV_RETRIES + 1) × JEV_TIMEOUT_MS`: 8 s at the
+defaults, which is what every guarded call and wrapped command paid during
+the 2026-09-21 provider outage until the breaker opened. `JEV_RETRIES=0`
+halves that and leaves sustained outages to the breaker; the retry only ever
+helped with a single transient 5xx or 429. Set it where the agent process
+will inherit it (Claude Code: `env` in `~/.claude/settings.json`; GUI-launched
+agents: the login session; terminals: the shell rc) and start a new session —
+a running one keeps the environment it began with.

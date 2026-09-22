@@ -8,7 +8,11 @@
 //  Docs: https://docs.typesafe.ai/api.md
 // ──────────────────────────────────────────────────────────────────────
 
-import { redactState } from "./privacy.mjs";
+import { readFileSync, unlinkSync } from "node:fs";
+import { join } from "node:path";
+import { redactState, redactText, writePrivateFile } from "./privacy.mjs";
+import { stateDir } from "./log.mjs";
+import config from "./config.mjs";
 
 export const ENDPOINT = process.env.TYPESAFE_BASE_URL
   ? `${process.env.TYPESAFE_BASE_URL.replace(/\/+$/, "")}/v1/systemone`
@@ -33,6 +37,68 @@ export function apiKey() {
 
 export function haveKey() {
   return Boolean(process.env.TYPESAFE_API_KEY);
+}
+
+// ── Circuit breaker ──────────────────────────────────────────────────
+//
+// Every hook waits on this request. While the provider is down each one
+// waits (retries + 1) × timeout for nothing — a 503 outage on 2026-09-21
+// made every wrapped command and guarded call stall. So after a few
+// consecutive provider failures the layer stops asking for a cooldown and
+// fails open at once, then lets one trial request through when the
+// cooldown has passed. State is a tiny file, because every hook is its
+// own process. Only provider-side failures count: a 4xx or a malformed
+// answer is this layer's bug and comes back fast anyway.
+
+const breakerPath = () => join(stateDir(), "breaker.json");
+const breakerEnabled = () => Number.isFinite(config.breakerFailures) && config.breakerFailures > 0;
+
+function readBreaker() {
+  try {
+    const state = JSON.parse(readFileSync(breakerPath(), "utf8"));
+    return { failures: Number(state.failures) || 0, openedAt: Number(state.openedAt) || 0, last: String(state.last ?? "") };
+  } catch {
+    return { failures: 0, openedAt: 0, last: "" };
+  }
+}
+
+function writeBreaker(state) {
+  try {
+    writePrivateFile(breakerPath(), JSON.stringify(state));
+  } catch {
+    // A breaker that cannot persist simply never opens.
+  }
+}
+
+/** @returns {{open: boolean, failures: number, openedAt: number, last: string, retryInMs: number}} */
+export function breakerStatus(now = Date.now()) {
+  const state = readBreaker();
+  if (!breakerEnabled()) return { open: false, ...state, retryInMs: 0 };
+  const sinceOpened = now - state.openedAt;
+  const open = state.failures >= config.breakerFailures && sinceOpened < config.breakerCooldownMs;
+  return { open, ...state, retryInMs: open ? config.breakerCooldownMs - sinceOpened : 0 };
+}
+
+function recordProviderFailure(message) {
+  if (!breakerEnabled()) return;
+  const state = readBreaker();
+  const failures = state.failures + 1;
+  writeBreaker({
+    failures,
+    // Opening (or re-opening after a failed trial) restarts the cooldown.
+    openedAt: failures >= config.breakerFailures ? Date.now() : state.openedAt,
+    last: redactText(String(message)).slice(0, 200),
+  });
+}
+
+function recordProviderSuccess() {
+  if (!breakerEnabled()) return;
+  if (readBreaker().failures > 0) writeBreaker({ failures: 0, openedAt: 0, last: "" });
+}
+
+/** Forget recorded failures. Tests use it; so can a person after an outage. */
+export function resetBreaker() {
+  try { unlinkSync(breakerPath()); } catch { /* nothing recorded */ }
 }
 
 // ── Question constructors ────────────────────────────────────────────
@@ -75,6 +141,14 @@ export async function systemOne({
   }
 
   const key = apiKey();
+
+  const breaker = breakerStatus();
+  if (breaker.open) {
+    throw new JevUnavailable(
+      `circuit open after ${breaker.failures} consecutive provider failures (last: ${breaker.last || "unknown"}); retrying in ${Math.ceil(breaker.retryInMs / 1000)} s`,
+    );
+  }
+
   let body;
   try {
     // State and question instructions can contain tool input or free text.
@@ -106,15 +180,20 @@ export async function systemOne({
         } catch (err) {
           throw new JevUnavailable("TypeSafe response was not valid JSON", err);
         }
-        return validateResponse(response, questions);
+        const validated = validateResponse(response, questions);
+        recordProviderSuccess();
+        return validated;
       }
 
-      // Provider error bodies may echo sensitive input. A status is sufficient
-      // to diagnose the response class without sending echoed data to logs.
+      // Redact the complete error body before truncating it; slicing first can
+      // leave a PEM or credential value without the delimiter that protects it.
+      const detail = redactText(await res.text().catch(() => "")).slice(0, 400);
+      // 4xx other than 429 is our bug — a bad question or oversized state.
+      // Retrying cannot help, so surface it immediately.
       if (res.status !== 429 && res.status < 500) {
-        throw new JevUnavailable(`TypeSafe ${res.status}`);
+        throw new JevUnavailable(`TypeSafe ${res.status}: ${detail}`);
       }
-      lastError = new JevUnavailable(`TypeSafe ${res.status}`);
+      lastError = new JevUnavailable(`TypeSafe ${res.status}: ${detail}`);
     } catch (err) {
       if (err instanceof JevUnavailable && !/^TypeSafe 5|429/.test(err.message)) throw err;
       lastError = err;
@@ -125,7 +204,13 @@ export async function systemOne({
     if (attempt < retries) await sleep(120 * 2 ** attempt);
   }
 
-  throw new JevUnavailable("TypeSafe request failed", lastError);
+  // The log records only this message, so it has to carry the cause: a
+  // provider 503, a timeout and a DNS failure call for different responses.
+  const why = lastError?.name === "AbortError"
+    ? `timed out after ${timeoutMs} ms per attempt`
+    : [lastError?.message, lastError?.cause?.code].filter(Boolean).join(" ") || "unknown error";
+  recordProviderFailure(why);
+  throw new JevUnavailable(`TypeSafe request failed after ${retries + 1} attempt(s): ${why}`, lastError);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -159,7 +244,9 @@ const validateProbabilityMap = (probabilities, allowed, where) => {
   }
   for (const key of keys) finiteProbability(probabilities[key], `${where}.probabilities.${key}`);
   const total = keys.reduce((sum, key) => sum + probabilities[key], 0);
-  if (Math.abs(total - 1) > 0.01) invalidResponse(`${where}.probabilities`, "probabilities must sum to 1");
+  if (Math.abs(total - 1) > 0.02) {
+    invalidResponse(`${where}.probabilities`, "probabilities must sum to approximately 1");
+  }
 };
 
 const validateNoul = (answer, where) => {

@@ -9,6 +9,9 @@ process.env.JEV_STATE_DIR = join(stateRoot, "state");
 delete process.env.JEV_LOG;
 process.env.TYPESAFE_API_KEY = "test-key";
 process.env.JEV_RETRIES = "0";
+// The breaker has its own suite (breaker.mjs); the deliberate failures here
+// must not open it for the tests that follow.
+process.env.JEV_BREAKER_FAILURES = "0";
 
 const { JevUnavailable, choice, noul, score, systemOne } = await import("../lib/client.mjs");
 const { SHAPES, slim } = await import("../lib/slim.mjs");
@@ -200,6 +203,84 @@ test("provider error bodies cannot leak echoed credentials through error message
     (error) => error instanceof JevUnavailable
       && !/synthetic-secret|synthetic-token/.test(error.message),
   );
+});
+
+test("redaction keeps an object that is referenced twice and cuts only true cycles", async () => {
+  // Two questions sharing one criteria map is ordinary JSON. A redactor that
+  // tracked every visited object replaced the second reference with
+  // "[REDACTED]", and TypeSafe answered 422 on every slimming request.
+  const { redactState } = await import("../lib/privacy.mjs");
+  const shared = { B000: null, B001: null };
+  const out = redactState({ a: { criteria: shared }, b: { criteria: shared } });
+  assert.deepEqual(out.a.criteria, shared);
+  assert.deepEqual(out.b.criteria, shared);
+
+  const cyclic = { name: "x" };
+  cyclic.self = cyclic;
+  assert.equal(redactState(cyclic).self, "[REDACTED]");
+});
+
+test("the slimming request carries a criteria map for every block question", async () => {
+  let request;
+  installMock(validSlimResponse(100), (_url, options) => {
+    request = JSON.parse(options.body);
+  });
+  await slim(hundredLines, { task: "inspect test output", command: "npm test" });
+  for (const id of ["relevance", "second_relevance"]) {
+    assert.equal(typeof request.questions[id].criteria, "object", id);
+    assert.ok("B000" in request.questions[id].criteria, `${id} must name the blocks`);
+  }
+});
+
+test("free-text redaction covers environment-style names and prefixed tokens", async () => {
+  const { redactText } = await import("../lib/privacy.mjs");
+  for (const [input, expected] of [
+    ["AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG", "AWS_SECRET_ACCESS_KEY=[REDACTED]"],
+    ["GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyz0123456789", "GITHUB_TOKEN=[REDACTED]"],
+    ["TOKEN=abc123", "TOKEN=[REDACTED]"],
+    ["export TYPESAFE_API_KEY=apikey_2252f7469cc801bd4b0ca8", "export TYPESAFE_API_KEY=[REDACTED]"],
+    ["key sk-proj-abcdefghijklmnop1234567890 here", "key [REDACTED] here"],
+    ["id AKIAIOSFODNN7EXAMPLE", "id [REDACTED]"],
+    ["xoxb-1234-5678-abcdefgh", "[REDACTED]"],
+    ["password: hunter2", "password: [REDACTED]"],
+  ]) {
+    assert.equal(redactText(input), expected, input);
+  }
+  assert.equal(redactText("npm run build --workspace=api"), "npm run build --workspace=api", "ordinary text is untouched");
+});
+
+test("a failed request names its cause: provider status, network error, or timeout", async () => {
+  const question = noul("Is this a greeting?");
+
+  globalThis.fetch = async () => ({ ok: false, status: 503, async text() { return "upstream unavailable"; } });
+  await assert.rejects(systemOne({ state: "hi", questions: { q: question }, retries: 1 }), (error) => {
+    assert.ok(error instanceof JevUnavailable);
+    assert.match(error.message, /after 2 attempt\(s\): TypeSafe 503/);
+    return true;
+  });
+
+  globalThis.fetch = async () => {
+    const failure = new TypeError("fetch failed");
+    failure.cause = { code: "ENOTFOUND" };
+    throw failure;
+  };
+  await assert.rejects(systemOne({ state: "hi", questions: { q: question }, retries: 0 }), (error) => {
+    assert.match(error.message, /after 1 attempt\(s\): fetch failed ENOTFOUND/);
+    return true;
+  });
+
+  globalThis.fetch = (_url, { signal }) =>
+    new Promise((_resolve, reject) => {
+      signal.addEventListener("abort", () => {
+        const aborted = new Error("This operation was aborted");
+        aborted.name = "AbortError";
+        reject(aborted);
+      });
+    });
+  await assert.rejects(systemOne({ state: "hi", questions: { q: question }, retries: 0, timeoutMs: 20 }), (error) => {
+    assert.match(error.message, /timed out after 20 ms per attempt/);
+    return true;
+  });
 });
 
 test("decision logs are redacted and private", () => {

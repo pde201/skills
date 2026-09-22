@@ -108,7 +108,9 @@ export function validateTrace(trace, { mode = "offline", allowHarnessTest = fals
   if (!isObject(trace.result)) pushIssue(issues, "evidence", "missing-result", "trace.result must be a structured result object");
 
   if (mode === "live") {
-    if (trace.split !== "holdout") pushIssue(issues, "evidence", "not-held-out", "live traces must carry split=holdout");
+    if (trace.split !== "holdout" && !(allowHarnessTest && trace.source === "harness-test" && trace.split === "synthetic")) {
+      pushIssue(issues, "evidence", "not-held-out", "live traces must carry split=holdout");
+    }
     if (!isObject(trace.measurements)) {
       pushIssue(issues, "evidence", "missing-live-measurements", "live traces need measurements");
     } else {

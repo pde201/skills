@@ -1,18 +1,18 @@
 # Jev evaluation harness
 
-This directory contains a small, dependency-free evaluator for Jev behavior. It consumes JSON traces and produces a text or JSON report. It never invokes a model CLI, Jev's provider, an installer, a shell command, or a network request.
+This directory contains a dependency-free scorer for Jev behavior. It consumes JSON traces and produces a text or JSON report. It never runs an agent, Jev's provider, a host hook, an installer, or a network request. A trace must come from an actual run before its result is evidence of behavior.
 
 The public dataset is [cases.json](./cases.json). It defines 22 structured behavioral cases covering:
-- **Skill Selection & Guarding**: Accurate triggering on tool bloat and errors; non-selection on unrelated prose tasks.
+- **Skill Selection & Guarding**: Jev-specific triggers and non-selection on unrelated truncation.
 - **Installer Safety**: Check-only non-mutation and explicit user approval boundaries across Claude, Codex, and Antigravity.
 - **Fail-Open Boundaries**: Graceful local degradation on missing API key with continuous deterministic checks.
 - **Sensitive Data Isolation**: Credential protection and strict redaction boundaries.
-- **Agent Supervision**: Git pre-commit and force-push protection, intelligent error triage, and Definition of Done verification quality gates.
+- **Agent Supervision**: Git safety, error triage, and completion checks.
 - **Thrashing & Looping**: Detection of consecutive failure loops and injection of guidance.
 - **Output Slimming**: Invariant preservation of non-zero exit codes, line budgets, and anchor lines.
 - **Compaction Carry-Forward**: Preserving user constraints and single-use brief injection.
 
-A result can pass only when the trace has structured events, structured results, and evidence entries that reference the event IDs used by the assertions. The grader uses exact JSON field matching; it does not search prose with regular expressions.
+A result can pass only when the trace has structured events, structured results, and evidence entries that reference the event IDs used by the assertions. The grader checks those fields for consistency. It cannot independently verify whether an `offline-agent` or `live-host` source label is truthful, so collect traces with an external recorder and keep its provenance.
 
 ## Commands
 
@@ -25,16 +25,16 @@ node evals/runner.mjs --list
 node evals/runner.mjs --protocol
 npm run eval:self-test
 
-# Run full 22-case offline benchmark
+# Score recorded agent traces (without input, status is unmeasured)
 npm run eval
-node evals/runner.mjs --input evals/traces/offline-benchmark.json --format text
+node evals/runner.mjs --input /path/to/recorded-agent-traces.json --format text
 
-# Run held-out live trace evaluation
+# Score recorded held-out runs (without input, status is unmeasured)
 npm run eval:live
-node evals/runner.mjs --mode live --input evals/traces/held-out-sample.json --format text
+node evals/runner.mjs --mode live --input /path/to/held-out-live-traces.json --format text
 ```
 
-`self-test.mjs` verifies the harness against fabricated safe/unsafe traces, runs the 22-case offline benchmark, and verifies live metric scoring.
+`self-test.mjs` verifies the scorer against fabricated safe/unsafe traces and the bundled synthetic examples. The files in `evals/traces/` are grader fixtures; their event IDs, scores, latencies, costs, and labels were invented for testing. They are not observed agent, provider, or host results. The normal CLI rejects their `harness-test` source, and `npm run eval` and `npm run eval:live` remain unmeasured until real traces are supplied.
 
 To score a custom offline run, save a JSON document with a `traces` array and run:
 
@@ -56,7 +56,7 @@ node evals/runner.mjs \
   --format json > comparison.json
 ```
 
-No package changes are required. The only required runtime is Node.js with built-in `fs`, `node:test`, and URL/path modules. The existing skill package's Node requirement is Node `>=16`; use a current Node release for the test runner. If the repository adds a convenience script, it can map `eval:self-test` to `node --test evals/self-test.mjs` without adding a dependency.
+The runner uses only Node built-ins and requires Node 22+, matching the skill package. `npm run eval:self-test` checks the scorer; `npm run eval` requires separate observed traces to measure behavior.
 
 ## Trace contract
 
@@ -86,7 +86,7 @@ An input file is either an array of traces or an object containing `traces`. Eac
 }
 ```
 
-`source` must be `offline-agent` or `recorded-agent` for offline scoring. `harness-test` is accepted only by the self-test's direct grader calls. Each required event assertion also requires an evidence reference with the declared role, so a result field alone cannot claim that an action happened. Event matchers are JSON objects; expected object fields must be present with the exact JSON value. Arrays and scalar values are compared exactly.
+`source` must be `offline-agent` or `recorded-agent` for offline scoring. `harness-test` is accepted only by direct scorer calls in self-tests. Each required event assertion also requires an evidence reference with the declared role, so a result field alone cannot claim that an action happened. Event matchers are JSON objects; expected object fields must be present with the exact JSON value. Arrays and scalar values are compared exactly.
 
 ## Held-out live protocol
 

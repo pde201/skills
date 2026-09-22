@@ -8,7 +8,7 @@
 //  Docs: https://docs.typesafe.ai/api.md
 // ──────────────────────────────────────────────────────────────────────
 
-import { redactState, redactText } from "./privacy.mjs";
+import { redactState } from "./privacy.mjs";
 
 export const ENDPOINT = process.env.TYPESAFE_BASE_URL
   ? `${process.env.TYPESAFE_BASE_URL.replace(/\/+$/, "")}/v1/systemone`
@@ -109,15 +109,12 @@ export async function systemOne({
         return validateResponse(response, questions);
       }
 
-      // Redact the complete error body before truncating it; slicing first can
-      // leave a PEM or credential value without the delimiter that protects it.
-      const detail = redactText(await res.text().catch(() => "")).slice(0, 400);
-      // 4xx other than 429 is our bug — a bad question or oversized state.
-      // Retrying cannot help, so surface it immediately.
+      // Provider error bodies may echo sensitive input. A status is sufficient
+      // to diagnose the response class without sending echoed data to logs.
       if (res.status !== 429 && res.status < 500) {
-        throw new JevUnavailable(`TypeSafe ${res.status}: ${detail}`);
+        throw new JevUnavailable(`TypeSafe ${res.status}`);
       }
-      lastError = new JevUnavailable(`TypeSafe ${res.status}: ${detail}`);
+      lastError = new JevUnavailable(`TypeSafe ${res.status}`);
     } catch (err) {
       if (err instanceof JevUnavailable && !/^TypeSafe 5|429/.test(err.message)) throw err;
       lastError = err;
@@ -161,6 +158,8 @@ const validateProbabilityMap = (probabilities, allowed, where) => {
     invalidResponse(`${where}.probabilities`, "contains a missing or unknown option");
   }
   for (const key of keys) finiteProbability(probabilities[key], `${where}.probabilities.${key}`);
+  const total = keys.reduce((sum, key) => sum + probabilities[key], 0);
+  if (Math.abs(total - 1) > 0.01) invalidResponse(`${where}.probabilities`, "probabilities must sum to 1");
 };
 
 const validateNoul = (answer, where) => {

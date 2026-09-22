@@ -75,7 +75,7 @@ test("an empty API response leaves the complete 100-line output untouched", asyn
   assert.equal("fullPath" in result, false);
 });
 
-test("malformed typed answers fail closed for slimming", async () => {
+test("malformed typed answers leave slimming output unchanged", async () => {
   const variants = [
     {},
     {
@@ -178,6 +178,28 @@ test("typed response validation rejects missing answers and invalid identifiers"
     },
   });
   await assert.rejects(systemOne({ state: "x", questions }), (error) => error instanceof JevUnavailable);
+
+  installMock({
+    ...valid,
+    answers: {
+      ...valid.answers,
+      shape: { ...valid.answers.shape, probabilities: { alpha: 0, beta: 0 } },
+    },
+  });
+  await assert.rejects(systemOne({ state: "x", questions }), (error) => error instanceof JevUnavailable);
+});
+
+test("provider error bodies cannot leak echoed credentials through error messages", async () => {
+  globalThis.fetch = async () => ({
+    ok: false,
+    status: 400,
+    text: async () => "received TYPESAFE_API_KEY=synthetic-secret from Authorization: Bearer synthetic-token",
+  });
+  await assert.rejects(
+    systemOne({ state: "safe", questions: { answer: noul("Is it safe?") } }),
+    (error) => error instanceof JevUnavailable
+      && !/synthetic-secret|synthetic-token/.test(error.message),
+  );
 });
 
 test("decision logs are redacted and private", () => {

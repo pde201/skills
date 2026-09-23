@@ -20,8 +20,11 @@ that all secrets, names, or personal data are removed. Confirm the endpoint
 and data category are permitted before enabling remote judgments. Provider
 retention and account policies are not established by this repository.
 
-Full original output is saved locally for recovery; local briefs and stashed
-prompts may also contain sensitive text. Files use owner-only permissions and
+When stdout is shortened, the complete original text is saved locally for
+recovery. The opt-in `JEV_SLIM_FAILURES=1` summary works locally and saves
+full failed stdout without sending it to the provider. Decision logs record
+output byte counts and exit status, not output content. Local briefs and
+stashed prompts may also contain sensitive text. Files use owner-only permissions and
 private directories. Existing copies created by older versions are not
 retroactively scrubbed. OS permissions do not protect against other processes
 running as the same user.

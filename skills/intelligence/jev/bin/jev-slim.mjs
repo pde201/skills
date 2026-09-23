@@ -9,7 +9,8 @@
 //  which is the point: Claude Code hooks are one caller, not the only one.
 //
 //  Rules it will not break:
-//    · a non-zero exit prints everything, verbatim
+//    · a non-zero exit prints everything verbatim by default; the optional
+//      local failure summary keeps a private full copy
 //    · stderr is never slimmed
 //    · the child's exit code is the exit code
 //    · any failure inside this script prints the original output
@@ -17,7 +18,8 @@
 
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { slim } from "../lib/slim.mjs";
+import { performance } from "node:perf_hooks";
+import { slim, summarizeFailedStdout } from "../lib/slim.mjs";
 import config from "../lib/config.mjs";
 import { logDecision } from "../lib/log.mjs";
 
@@ -68,57 +70,71 @@ async function runExec() {
   }
 
   const shell = process.env.SHELL && /bash|zsh/.test(process.env.SHELL) ? process.env.SHELL : "/bin/bash";
+  const commandStarted = performance.now();
   const child = spawn(shell, ["-c", command], { stdio: ["inherit", "pipe", "pipe"] });
 
   // Collected as buffers and decoded once: appending chunks as strings
   // splits multi-byte characters at chunk boundaries and turns `─` into `��`.
   const outChunks = [];
-  const errChunks = [];
+  let stderrBytes = 0;
   child.stdout.on("data", (chunk) => outChunks.push(chunk));
-  child.stderr.on("data", (chunk) => errChunks.push(chunk));
+  // stderr is never slimmed, so show it immediately. pipe handles backpressure
+  // and does not close the host's stderr when the child ends.
+  child.stderr.on("data", (chunk) => { stderrBytes += chunk.length; });
+  child.stderr.pipe(process.stderr, { end: false });
 
   const code = await new Promise((resolve) => {
     child.on("error", () => resolve(127));
     child.on("close", (c, signal) => resolve(signal ? 128 : (c ?? 0)));
   });
+  const commandMs = performance.now() - commandStarted;
 
   const rawOut = Buffer.concat(outChunks);
-  const rawErr = Buffer.concat(errChunks);
-
-  // A command that failed is the one whose output you must not touch.
-  if (code !== 0) {
-    process.stdout.write(rawOut);
-    if (rawErr.length) process.stderr.write(rawErr);
-    process.exit(code);
-  }
-
   const out = rawOut.toString("utf8");
-  const err = rawErr.toString("utf8");
-
-  const started = Date.now();
+  const textRoundTrips = Buffer.from(out, "utf8").equals(rawOut);
+  const slimStarted = performance.now();
   let result;
-  try {
-    result = await slim(out, { task, command, minLines: config.slimMinLines, model: config.model });
-  } catch (error) {
-    process.stdout.write(out);
-    if (err) process.stderr.write(err);
-    process.exit(code);
+  if (!textRoundTrips) {
+    result = { text: out, changed: false, reason: "non-UTF-8 stdout preserved" };
+  } else if (code !== 0) {
+    try {
+      result = config.slimFailures
+        ? summarizeFailedStdout(out, { minLines: config.slimMinLines })
+        : { text: out, changed: false, reason: "nonzero exit: original stdout preserved" };
+    } catch {
+      result = { text: out, changed: false, reason: "failure summary error: original stdout preserved" };
+    }
+  } else {
+    try {
+      result = await slim(out, { task, command, minLines: config.slimMinLines, model: config.model });
+    } catch {
+      result = { text: out, changed: false, reason: "slimmer error: original stdout preserved" };
+    }
   }
+  const slimMs = performance.now() - slimStarted;
+
+  // Preserve the original bytes for every unchanged result, including failed
+  // commands. A summary is text and always links to its private full copy.
+  process.stdout.write(result.changed ? result.text : rawOut);
 
   logDecision({
     hook: "jev-slim",
-    command: command.slice(0, 200),
+    ...(code === 0 ? { command: command.slice(0, 200) } : {}),
     changed: result.changed,
     reason: result.reason,
     lines_in: out.split("\n").length,
     lines_out: result.text.split("\n").length,
-    ms: Date.now() - started,
+    stdout_bytes: rawOut.length,
+    stdout_out_bytes: result.changed ? Buffer.byteLength(result.text) : rawOut.length,
+    stderr_bytes: stderrBytes,
+    exit_code: code,
+    command_ms: Math.round(commandMs),
+    ms: Math.round(slimMs),
+    wrapper_ms: Math.round(performance.now()),
     cost_usd: result.cost,
   });
 
-  process.stdout.write(result.text);
-  if (err) process.stderr.write(err);
-  process.exit(code);
+  process.exitCode = code;
 }
 
 async function runFilter() {
@@ -146,6 +162,7 @@ Environment:
   JEV_TASK              the task when no --task* flag is given
   JEV_HOOKS=0           disable entirely
   JEV_SLIM_MIN_LINES    output shorter than this is never touched (default 60)
+  JEV_SLIM_FAILURES     opt-in local failed-stdout summary (default off)
   JEV_TIMEOUT_MS        per-request timeout (default 4000)
   JEV_BREAKER_FAILURES  consecutive provider failures before judgments are
                         skipped for JEV_BREAKER_COOLDOWN_MS (default 3 / 60000)

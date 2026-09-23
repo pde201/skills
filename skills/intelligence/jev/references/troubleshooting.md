@@ -122,6 +122,16 @@ through the decision path; the historical `ms` field starts after transcript
 processing. Neither includes host launch overhead, so use wall time for a full
 user-visible measurement.
 
+`jev-slim` records `command_ms`, `ms` (slimming work), and `wrapper_ms` (Node
+process start through output submission), plus stdout/stderr byte counts and
+the exit code. These timings include different spans; compare whole-command
+wall time with a direct run before claiming speed gained. Failed stdout and
+the exit code stay exact by default. `JEV_SLIM_FAILURES=1` enables a local-only
+diagnostic summary on long failed stdout, retaining exact selected lines and
+a private path to the complete stdout. It is an opt-in trial until labeled
+failure examples show that essential diagnostics survive. stderr streams as
+the command runs and is never slimmed.
+
 A failed judgment waits `(JEV_RETRIES + 1) × JEV_TIMEOUT_MS`: 8 s at the
 defaults, which is what every guarded call and wrapped command paid during
 the 2026-09-21 provider outage until the breaker opened. `JEV_RETRIES=0`

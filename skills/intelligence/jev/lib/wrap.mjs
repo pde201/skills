@@ -47,6 +47,25 @@ const heads = (command) =>
     .map((segment) => head(segment))
     .filter(Boolean);
 
+// These commands can print credentials. Their output must stay local even if
+// another segment in the shell command would otherwise qualify for slimming.
+const PRIVATE_OUTPUT = [
+  /\baws\b[^|;&\n]*\bsecretsmanager\s+(?:batch-)?get-secret-value\b/i,
+  /\baws\b[^|;&\n]*\bssm\s+get-parameters?(?:-by-path)?\b[^|;&\n]*\s--with-decryption\b/i,
+  /\baws\b[^|;&\n]*\b(?:ecr\s+get-login-password|sts\s+assume-role)\b/i,
+  /\bkubectl\b[^|;&\n]*\bconfig\s+view\b/i,
+  /\bkubectl\b[^|;&\n]*\b(?:get|describe)\s+secrets?\b/i,
+  /\bgcloud\b[^|;&\n]*\b(?:secrets\s+versions\s+access|auth\s+(?:application-default\s+)?print-access-token)\b/i,
+  /\bsops\b[^|;&\n]*\s(?:-d|--decrypt)\b/i,
+];
+
+// These inspection commands have bounded output in ordinary use. Keep the
+// bypass narrow: a pipeline or compound shell expression may also run a
+// high-output command, and should retain the existing wrapper behavior.
+const BOUNDED_INSPECTION = /^(?:\S+\/)?(?:kubectl\s+config\s+(?:current-context|get-contexts)|aws\s+sts\s+get-caller-identity|aws\s+configure\s+list-profiles)\b/;
+const isBoundedInspection = (command) =>
+  !/[|;&\n`$<>]/.test(command) && BOUNDED_INSPECTION.test(command.trim());
+
 /**
  * @returns {{wrap: boolean, why: string}}
  */
@@ -67,6 +86,13 @@ export function shouldWrap(command) {
   // Heredocs carry their own stdin; re-quoting them through another layer
   // is not worth the risk for a bit less output.
   if (/<<-?\s*['"]?\w+/.test(command)) return { wrap: false, why: "contains a heredoc" };
+
+  if (PRIVATE_OUTPUT.some((pattern) => pattern.test(command))) {
+    return { wrap: false, why: "may print credentials" };
+  }
+  if (isBoundedInspection(command)) {
+    return { wrap: false, why: "bounded inspection output" };
+  }
 
   const match = invoked.find((binary) => config.slimCommands.includes(binary));
   if (!match) return { wrap: false, why: "not a known bloat source" };

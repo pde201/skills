@@ -34,6 +34,28 @@ npm run eval:live
 node evals/runner.mjs --mode live --input /path/to/held-out-live-traces.json --format text
 ```
 
+## Output-path replay
+
+Run `npm run eval:output-path -- --log /path/to/jev-log.jsonl` to compare
+recorded slimmer calls with the current narrow wrapper exclusions. The report
+contains counts only; it never prints commands or output. Legacy commands
+logged at the 200-character limit are excluded because their tail is unknown.
+`--since ISO_DATE` selects a later collection window. Exit 1 means a command
+the new rule would skip previously produced a slimmed output; exit 2 means no
+measured rows. A replay of logs used to design the rules is exploratory,
+not held-out proof. Record later runs separately, and compare wall time,
+saved output, exit status, and host permission behavior before widening a
+skip rule.
+
+`npm run eval:wrapper` measures direct versus wrapped no-op process wall time
+with the provider key removed. It is a repeatable startup-overhead baseline,
+not a latency measurement for a real build or a prediction of tokens saved.
+
+The opt-in `JEV_SLIM_FAILURES=1` trial has synthetic regression tests for
+diagnostic retention and private recovery. Real failed-output retention is
+unmeasured until independently labeled examples are replayed. The default
+continues to print failed stdout byte for byte.
+
 `self-test.mjs` verifies the scorer against fabricated safe/unsafe traces and the bundled synthetic examples. The files in `evals/traces/` are grader fixtures; their event IDs, scores, latencies, costs, and labels were invented for testing. They are not observed agent, provider, or host results. The normal CLI rejects their `harness-test` source, and `npm run eval` and `npm run eval:live` remain unmeasured until real traces are supplied.
 
 To score a custom offline run, save a JSON document with a `traces` array and run:

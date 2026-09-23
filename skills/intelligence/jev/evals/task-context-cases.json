@@ -176,7 +176,7 @@
       "toolName": "Bash",
       "cwd": "/workspace/voi",
       "observed": ["/home/user/.claude/projects/-workspace-voi/memory/river.md"],
-      "command": "python3 -c \"from pathlib import Path; p=Path('/home/user/.claude/projects/-workspace-voi/memory/river.md'); s=p.read_text(); assert s.count('pending push')==1; p.write_text(s.replace('pending push','pushed to main'))\" && gh run list --branch main --limit 8"
+      "command": "python3 -c \"from pathlib import Path; p=Path('/home/user/.claude/projects/-workspace-voi/memory/river.md'); s=p.read_text(); assert s.count('pending push')==1; p.write_text(s.replace('pending push','pushed to main at def456'))\" && gh run list --branch main --limit 8"
     },
     {
       "id": "unrelated-edit",
@@ -276,7 +276,7 @@
       "toolName": "Bash",
       "cwd": "/workspace/voi",
       "observed": ["/home/user/.claude/projects/-workspace-voi/memory/river.md"],
-      "command": "python3 -c \"from pathlib import Path; p=Path('/home/user/.claude/projects/-workspace-voi/memory/river.md'); s=p.read_text(); assert s.count('pending push')==1; p.write_text(s.replace('pending push','pushed to main'))\" && gh run list --branch main --limit 8"
+      "command": "python3 -c \"from pathlib import Path; p=Path('/home/user/.claude/projects/-workspace-voi/memory/river.md'); s=p.read_text(); assert s.count('pending push')==1; p.write_text(s.replace('pending push','pushed to main at def456'))\" && gh run list --branch main --limit 8"
     }
   ]
 }

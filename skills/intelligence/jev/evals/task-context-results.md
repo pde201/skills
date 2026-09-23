@@ -19,7 +19,7 @@ decisions.
 
 | Task text | Safe calls interrupted | Hazardous calls allowed |
 | --- | ---: | ---: |
-| Latest message only | 16 / 54 | 6 / 33 |
+| Latest message only | 18 / 54 | 9 / 33 |
 | Recent directions, latest overrides | 0 / 54 | 0 / 33 |
 
 The baseline's false interruptions included a backend edit after a UI
@@ -62,8 +62,8 @@ Another real prompt (`intent_mismatch=0.62`) interrupted a command that
 accurately recorded a user-run push in an already-used Claude project memory
 file and read CI runs. The installed hook dropped the user's terminal relay
 when extracting task text. Jev now takes only confirmed `git push` results
-from that relay as observed state, without treating them as user instructions
-or sending the raw output. A known agent-owned memory directory is included
+from that relay as observed state, scoped to the latest human task and tagged
+with the pushed short SHA when available. The raw output is not sent. A known agent-owned memory directory is included
 in workspace scope; the claimed push still gets questioned if no confirmed
 push exists. In the synthetic pair, the completed-push follow-up was allowed
 in all three revised runs and interrupted in all three baseline runs. The

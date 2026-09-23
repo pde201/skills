@@ -1522,7 +1522,18 @@ test("a successful user-run push is evidence without becoming a user request", (
     { type: "user", origin: { kind: "human" }, message: { role: "user", content: "<bash-input>git push origin prod</bash-input><bash-stdout>! [rejected] prod -> prod</bash-stdout>" } },
   ].map((entry) => JSON.stringify(entry)).join("\n"));
   assert.equal(latestUserRequest(path), "Commit the River work.");
-  assert.deepEqual(recentUserActions(path), ["User-run git push to origin/main succeeded"]);
+  assert.deepEqual(recentUserActions(path), ["User-run git push to origin/main succeeded at def456"]);
+});
+
+test("a new human task clears an older push observation", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-user-action-stale-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, [
+    { type: "user", origin: { kind: "human" }, message: { role: "user", content: "Commit the first fix." } },
+    { type: "user", origin: { kind: "human" }, message: { role: "user", content: "<bash-input>git push origin main</bash-input><bash-stdout>abc123..def456 main -> main</bash-stdout>" } },
+    { type: "user", origin: { kind: "human" }, message: { role: "user", content: "Yes, commit the second fix; I will push it later." } },
+  ].map((entry) => JSON.stringify(entry)).join("\n"));
+  assert.deepEqual(recentUserActions(path), []);
 });
 
 test("active task context carries a substantive request through brief follow-ups", () => {

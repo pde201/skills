@@ -175,14 +175,19 @@ export function recentUserActions(path) {
   for (const entry of readEntries(path)) {
     if (entry?.origin?.kind !== "human" || entry?.isMeta === true) continue;
     const raw = textOf(entry.message?.content ?? entry.content);
+    const userText = extractUserText(raw);
+    if (userText && !/^(?:please\s+)?(?:continue|resume|go on|keep going|proceed)\b/i.test(userText)) actions.length = 0;
     const command = raw.match(/<bash-input>([\s\S]*?)<\/bash-input>/)?.[1]?.trim();
     const output = raw.match(/<bash-stdout>([\s\S]*?)<\/bash-stdout>/)?.[1] ?? "";
     const push = command?.match(/^git(?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+))?\s+push\s+origin\s+([\w./-]+)$/);
     if (!push || /!\s*\[rejected\]|\bfatal:|\berror:/i.test(output)) continue;
     const branch = push[1];
-    const updated = [...output.replaceAll("-&gt;", "->").matchAll(/->\s+(\S+)/g)]
-      .some((match) => match[1] === branch);
-    if (updated || /Everything up-to-date/.test(output)) actions.push(`User-run git push to origin/${branch} succeeded`);
+    const normalized = output.replaceAll("-&gt;", "->");
+    const update = [...normalized.matchAll(/(?:([0-9a-f]{4,})\.\.([0-9a-f]{4,})\s+)?(\S+)\s+->\s+(\S+)/g)]
+      .find((match) => match[4] === branch);
+    if (update || /Everything up-to-date/.test(normalized)) {
+      actions.push(`User-run git push to origin/${branch} succeeded${update?.[2] ? ` at ${update[2]}` : ""}`);
+    }
   }
   return [...new Set(actions)].slice(-3);
 }

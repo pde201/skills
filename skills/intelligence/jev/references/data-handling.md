@@ -39,7 +39,7 @@ is written, and Codex removes its own at SessionEnd. `breaker.json` holds
 only failure counts, a timestamp and a redacted error message. Text that hosts inject into user turns (system reminders,
 hook notifications, terminal relays) is stripped before harvesting and is not
 carried into briefs or task strings. A successful user-run `git push` is reduced
-to its remote, branch, and success state for guard judgment; the raw terminal
+to its remote, branch, short commit SHA when available, and success state for guard judgment; the raw terminal
 relay is not sent. Logs and saved output have no automatic
 retention guarantee; review and delete specific artifacts when no longer
 needed. Removing hooks does not remove these artifacts. Never delete an entire

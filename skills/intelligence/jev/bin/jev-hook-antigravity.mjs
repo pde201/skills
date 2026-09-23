@@ -34,7 +34,7 @@ import {
   triageToolError,
   checkGitSafety,
 } from "../lib/supervision.mjs";
-import { latestUserRequest, recentToolCalls, observedPaths, writtenDirs } from "../lib/transcript.mjs";
+import { activeTaskContext, recentToolCalls, recentUserActions, observedPaths, writtenDirs } from "../lib/transcript.mjs";
 import { logDecision, stateDir } from "../lib/log.mjs";
 import { writePrivateFile } from "../lib/privacy.mjs";
 import config from "../lib/config.mjs";
@@ -118,7 +118,7 @@ async function preToolUse(event) {
   const { toolCall, workspacePaths, transcriptPath } = event;
   const { toolName, input } = translate(toolCall);
   const cwd = toolCall?.args?.Cwd || workspacePaths?.[0] || process.cwd();
-  const task = latestUserRequest(transcriptPath);
+  const task = activeTaskContext(transcriptPath);
   const started = Date.now();
 
   // Git safety check on commits and pushes
@@ -149,6 +149,7 @@ async function preToolUse(event) {
       cwd,
       task,
       recentCalls: recentToolCalls(transcriptPath),
+      recentUserActions: recentUserActions(transcriptPath),
       observed: observedPaths(transcriptPath),
       // Antigravity names its workspace folders; they are the workspace.
       hostRoots: Array.isArray(workspacePaths) ? workspacePaths : [],

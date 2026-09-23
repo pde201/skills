@@ -7,9 +7,11 @@
 // ──────────────────────────────────────────────────────────────────────
 
 import { readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 
 const MAX_BYTES = 4_000_000;
+const ANCHOR_BYTES = 500_000;
 
 function readEntries(path) {
   if (!path) return [];
@@ -17,8 +19,12 @@ function readEntries(path) {
   try {
     const size = statSync(path).size;
     raw = readFileSync(path, "utf8");
-    // Transcripts grow without bound; only the tail is ever relevant.
-    if (size > MAX_BYTES) raw = raw.slice(-MAX_BYTES);
+    // Keep the first request as well as recent activity: a short follow-up
+    // can refer back to work that has fallen outside the transcript tail.
+    if (size > MAX_BYTES) {
+      const headSize = Math.min(ANCHOR_BYTES, size - MAX_BYTES);
+      raw = `${raw.slice(0, headSize)}\n${raw.slice(-MAX_BYTES)}`;
+    }
   } catch {
     return [];
   }
@@ -70,17 +76,22 @@ const extractUserText = (raw) => {
   const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
   if (match) return match[1].trim();
   const text = stripInjectedBlocks(raw);
+  if (/^\[Request interrupted by user(?: for tool use)?\]$/.test(text)) return "";
+  if (/^This session is being continued from a previous conversation that ran out of context\./.test(text)) return "";
+  if (/^The app was quit while you were working\. Please continue from where you left off\./.test(text)) return "";
   // Claude/Codex tool results arrive shaped as user turns; skip them
   if (text.startsWith("<") && !text.startsWith("<USER_REQUEST>")) return "";
   return text;
 };
 
 const isUserTurn = (entry) =>
-  entry?.type === "user" ||
-  entry?.role === "user" ||
-  entry?.message?.role === "user" ||
-  entry?.type === "USER_INPUT" ||
-  entry?.source === "USER_EXPLICIT";
+  entry?.isMeta !== true && (
+    entry?.type === "user" ||
+    entry?.role === "user" ||
+    entry?.message?.role === "user" ||
+    entry?.type === "USER_INPUT" ||
+    entry?.source === "USER_EXPLICIT"
+  );
 
 /** The most recent thing the human actually asked for. */
 export function latestUserRequest(path, { maxChars = 1500 } = {}) {
@@ -95,6 +106,93 @@ export function latestUserRequest(path, { maxChars = 1500 } = {}) {
   return "";
 }
 
+// Short steering and selection replies depend on the preceding task. An
+// independent request stands alone so old work cannot silently widen it.
+const FOLLOWUP = /^(?:please\s+)?(?:continue|resume|proceed|keep going|go on|carry on|go ahead|do it|(?:signed|logged) in[,;:]?\s+(?:go ahead|continue|proceed)|option\s+[a-z0-9]+|yes\b|okay\b|ok\b|agreed\b|confirm all\b|let'?s park\b|park\b|once\b|also\b|but\b|and\b|stop after\b|stop when\b)\b/i;
+const RESET_TASK = /^(?:instead\b|forget\b|new task\b|switch to\b|stop(?:[.!?]?\s*$| working on\b))/i;
+const REFERENCE_STOPWORDS = new Set([
+  "after", "again", "agreed", "before", "change", "changes", "commit", "commits",
+  "confirm", "continue", "files", "final", "going", "option", "please",
+  "proceed", "related", "resume", "review", "should", "start", "tests",
+  "their", "there", "these", "those", "three", "through", "update", "with",
+  "work", "would",
+]);
+
+function relatedEarlierTurn(turns, latest) {
+  const words = [...new Set((latest.toLowerCase().match(/[a-z][a-z0-9-]{4,}/g) ?? [])
+    .filter((word) => !REFERENCE_STOPWORDS.has(word)))];
+  if (!words.length) return "";
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const candidate = turns[i];
+    if (words.some((word) => new RegExp(`\\b${word}\\b`, "i").test(candidate))) return candidate;
+  }
+  return "";
+}
+
+const boundedText = (value, limit) => {
+  if (value.length <= limit) return value;
+  const marker = "\n[earlier task text omitted]\n";
+  if (limit <= marker.length) return value.slice(-limit);
+  const available = Math.max(0, limit - marker.length);
+  const head = Math.ceil(available / 2);
+  return `${value.slice(0, head)}${marker}${value.slice(-Math.floor(available / 2))}`;
+};
+
+/** The current request, with recent user directions when it amends ongoing work. */
+export function activeTaskContext(path, { latestPrompt = "", maxChars = 2000 } = {}) {
+  const turns = readEntries(path)
+    .filter(isUserTurn)
+    .map((entry) => extractUserText(textOf(entry.message?.content ?? entry.content)))
+    .filter(Boolean);
+  const prompt = extractUserText(latestPrompt);
+  if (prompt && prompt !== turns.at(-1)) turns.push(prompt);
+  const latest = turns.at(-1);
+  if (!latest) return "";
+  if (RESET_TASK.test(latest) || !FOLLOWUP.test(latest)) return boundedText(latest, maxChars);
+
+  const earlier = turns.slice(0, -1);
+  const prior = earlier.slice(-8);
+  let resetAt = -1;
+  for (let index = prior.length - 1; index >= 0; index--) {
+    if (RESET_TASK.test(prior[index])) { resetAt = index; break; }
+  }
+  if (resetAt > 0) prior.splice(0, resetAt);
+  const related = relatedEarlierTurn(earlier.slice(0, -prior.length), latest);
+  if (related && !prior.includes(related)) prior.unshift(related);
+  if (!prior.length) return boundedText(latest, maxChars);
+  const prefix = "Recent user directions (oldest first; latest overrides):\n";
+  const suffix = `\nLatest user direction:\n${boundedText(latest, Math.floor(maxChars / 2))}`;
+  const priorBudget = maxChars - prefix.length - suffix.length;
+  if (priorBudget < 80) return boundedText(latest, maxChars);
+  while (prior.length > 1 && priorBudget / prior.length < 85) prior.splice(related ? 1 : 0, 1);
+  const perTurn = Math.floor(priorBudget / prior.length) - 5;
+  const history = prior.map((turn, index) => `${index + 1}. ${boundedText(turn, perTurn)}`).join("\n");
+  return `${prefix}${history}${suffix}`;
+}
+
+/** Confirmed user-run pushes are observed state, never a new instruction. */
+export function recentUserActions(path) {
+  const actions = [];
+  for (const entry of readEntries(path)) {
+    if (entry?.origin?.kind !== "human" || entry?.isMeta === true) continue;
+    const raw = textOf(entry.message?.content ?? entry.content);
+    const userText = extractUserText(raw);
+    if (userText && !/^(?:please\s+)?(?:continue|resume|go on|keep going|proceed)\b/i.test(userText)) actions.length = 0;
+    const command = raw.match(/<bash-input>([\s\S]*?)<\/bash-input>/)?.[1]?.trim();
+    const output = raw.match(/<bash-stdout>([\s\S]*?)<\/bash-stdout>/)?.[1] ?? "";
+    const push = command?.match(/^git(?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+))?\s+push\s+origin\s+([\w./-]+)$/);
+    if (!push || /!\s*\[rejected\]|\bfatal:|\berror:/i.test(output)) continue;
+    const branch = push[1];
+    const normalized = output.replaceAll("-&gt;", "->");
+    const update = [...normalized.matchAll(/(?:([0-9a-f]{4,})\.\.([0-9a-f]{4,})\s+)?(\S+)\s+->\s+(\S+)/g)]
+      .find((match) => match[4] === branch);
+    if (update || /Everything up-to-date/.test(normalized)) {
+      actions.push(`User-run git push to origin/${branch} succeeded${update?.[2] ? ` at ${update[2]}` : ""}`);
+    }
+  }
+  return [...new Set(actions)].slice(-3);
+}
+
 /** Recent tool calls and whether they failed — the context for "is this a repeat?". */
 export function recentToolCalls(path, { limit = 12 } = {}) {
   const entries = readEntries(path);
@@ -105,7 +203,7 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
     if (Array.isArray(content)) {
       for (const part of content) {
         if (part?.type === "tool_use") {
-          calls.push({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), failed: false, id: part.id });
+          calls.push({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), signature: callSignature(part.name, part.input), failed: false, id: part.id });
         } else if (part?.type === "tool_result") {
           const call = calls.find((c) => c.id === part.tool_use_id);
           if (call) {
@@ -122,7 +220,7 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
         const id = call.id ?? String(entry.step_index ?? Math.random());
         const failed = Boolean(entry?.status === "ERROR" || call?.status === "ERROR" || call?.is_error || entry?.is_error);
         const args = call.args ?? call.input;
-        calls.push({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), failed, id });
+        calls.push({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), signature: callSignature(call.name, args), failed, id });
       }
     } else if (entry?.source === "MODEL" && entry?.type === "GENERIC" && calls.length > 0) {
       const lastCall = calls[calls.length - 1];
@@ -161,6 +259,13 @@ function summarizeInput(input) {
   if (typeof input.pattern === "string") return input.pattern;
   if (typeof input.Pattern === "string") return input.Pattern;
   return JSON.stringify(input).slice(0, 300);
+}
+
+/** Local fingerprint for an unchanged retry without retaining full input. */
+export function callSignature(tool, input) {
+  const value = tool === "Bash" ? input?.command : input;
+  if (value === undefined) return "";
+  return createHash("sha256").update(JSON.stringify([tool, value])).digest("hex");
 }
 
 const FILE_WRITE_TOOLS = new Set([

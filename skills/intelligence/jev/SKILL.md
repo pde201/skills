@@ -50,8 +50,11 @@ receives an explicit `allow` from Jev.
 
 ## Guarantees and limits
 
-- `jev-slim exec` preserves stdout, stderr, and exit status on a nonzero
-  command exit. `jev-slim filter` cannot observe its upstream exit status.
+- `jev-slim exec` preserves failed stdout byte for byte by default, streams
+  stderr, and preserves the exit status. `JEV_SLIM_FAILURES=1` trials a local
+  diagnostic summary with a private full-stdout copy; use only after checking
+  evidence retention for the task. `jev-slim filter` cannot observe its
+  upstream exit status.
 - Invalid or unavailable model judgments leave output intact and add no model
   restriction. Deterministic checks still apply. A circuit breaker pauses
   remote judgments after repeated provider failures and retries one trial

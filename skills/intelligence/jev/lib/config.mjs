@@ -53,6 +53,9 @@ export const config = {
 
   // Output below this many lines is not worth a round trip.
   slimMinLines: num("JEV_SLIM_MIN_LINES", 60),
+  // Experimental local-only summary for failed command stdout. The default
+  // keeps the existing exact-output guarantee until real failures are labeled.
+  slimFailures: bool("JEV_SLIM_FAILURES", false),
 
   // Guard thresholds. Deliberately conservative: `ask` is cheap, `deny` is
   // not. Tune these against jev-log.jsonl on real sessions before trusting

@@ -208,6 +208,60 @@ function stash(text) {
   return writePrivateFile(path, text);
 }
 
+const FAILURE_ANCHOR = /\b(?:[a-z]*error|errors|failed|failure|exception|assertion|traceback|caused by)\b|^\s*not ok\b/i;
+const MIN_FAILURE_LINES = 120;
+const MAX_FAILURE_LINES = 100;
+
+/**
+ * An opt-in, local-only failed-stdout trial. Keep exact diagnostic lines with
+ * nearby context and the command's tail. If the evidence cannot fit, return
+ * the original output. stderr is never passed here and remains verbatim.
+ */
+export function summarizeFailedStdout(output, { minLines = MIN_FAILURE_LINES } = {}) {
+  const unchanged = (reason) => ({ text: output, changed: false, reason });
+  if (typeof output !== "string" || !output.trim()) return unchanged("empty failure stdout");
+
+  const lines = output.split("\n");
+  if (lines.length < Math.max(MIN_FAILURE_LINES, minLines)) return unchanged("short failure stdout");
+
+  const anchors = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (FAILURE_ANCHOR.test(lines[i])) anchors.push(i);
+  }
+  if (!anchors.length) return unchanged("no diagnostic anchor");
+
+  const keep = new Set();
+  const addRange = (start, end) => {
+    for (let i = Math.max(0, start); i <= Math.min(lines.length - 1, end); i++) keep.add(i);
+  };
+  addRange(0, 3);
+  addRange(lines.length - 30, lines.length - 1);
+  for (const anchor of anchors) addRange(anchor - 2, anchor + 2);
+  if (keep.size >= lines.length || keep.size > MAX_FAILURE_LINES) {
+    return unchanged("diagnostics exceed failure summary budget");
+  }
+
+  const selected = [...keep].sort((a, b) => a - b);
+  const parts = [];
+  let previous = -1;
+  for (const i of selected) {
+    if (i > previous + 1) parts.push(`[… ${i - previous - 1} lines hidden …]`);
+    parts.push(lines[i]);
+    previous = i;
+  }
+  if (previous < lines.length - 1) parts.push(`[… ${lines.length - previous - 1} lines hidden …]`);
+
+  const fullPath = stash(output);
+  const hidden = lines.length - selected.length;
+  const footer = `[jev: ${hidden} of ${lines.length} failed-output lines hidden; full stdout: ${fullPath}]`;
+  return {
+    text: `${parts.join("\n")}\n\n${footer}`,
+    changed: true,
+    hidden,
+    reason: `failure diagnostics · kept ${selected.length}/${lines.length} lines`,
+  };
+}
+
 // ── Entry point ──────────────────────────────────────────────────────
 
 /**

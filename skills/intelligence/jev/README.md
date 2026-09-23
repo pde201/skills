@@ -14,9 +14,12 @@ for installation, troubleshooting, data handling, and evaluation.
   judges scope against the workspace (cwd, host folders, directories already
   written to, temp, `JEV_WORKSPACE_ROOTS`) rather than the cwd alone.
 - `lib/wrap.mjs` decides which shell commands are worth routing through the
-  slimmer and builds the rewrite; `lib/config.mjs` holds every knob and default.
+  slimmer, skips short inspections and known secret-output commands,
+  and builds the rewrite; `lib/config.mjs` holds every knob and default.
 - `lib/slim.mjs` preserves full local output and selects ranked blocks only after
-  a valid response. `bin/jev-slim.mjs` supplies exec and filter modes.
+  a valid response. `bin/jev-slim.mjs` supplies exec and filter modes, streams
+  stderr, and records command, slimming, and wrapper timing. Failed stdout is
+  unchanged by default; a local-only summary is available for opt-in trials.
 - `lib/supervision.mjs` provides git safety, thrashing and goal-drift detection,
   error triage, and the Definition of Done gate.
 - `lib/carryforward.mjs` preserves chronological user context and selects optional

@@ -66,6 +66,15 @@ const BOUNDED_INSPECTION = /^(?:\S+\/)?(?:kubectl\s+config\s+(?:current-context|
 const isBoundedInspection = (command) =>
   !/[|;&\n`$<>]/.test(command) && BOUNDED_INSPECTION.test(command.trim());
 
+// If a final `head` caps stdout below the slimming threshold, an
+// extra command wrapper cannot reduce it. Exclude compound expressions so a
+// later command cannot produce additional output after the cap.
+function isBoundedPipeline(command) {
+  if (/[;&\n`$<>\\'\"]/.test(command) || command.includes("||")) return false;
+  const match = /\|\s*head\s+(?:-n\s*)?(\d+)\s*$/.exec(command);
+  return Boolean(match && Number(match[1]) + 1 < config.slimMinLines);
+}
+
 /**
  * @returns {{wrap: boolean, why: string}}
  */
@@ -92,6 +101,9 @@ export function shouldWrap(command) {
   }
   if (isBoundedInspection(command)) {
     return { wrap: false, why: "bounded inspection output" };
+  }
+  if (isBoundedPipeline(command)) {
+    return { wrap: false, why: "stdout capped below slimming threshold" };
   }
 
   const match = invoked.find((binary) => config.slimCommands.includes(binary));

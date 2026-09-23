@@ -52,6 +52,13 @@ esac
 
 SETTINGS="${CLAUDE_SETTINGS:-$HOME/.claude/settings.json}"
 HOOK_CMD="node $JEV_DIR/bin/jev-hook.mjs"
+POST_SLIM_MODE=false
+case "${JEV_CLAUDE_POST_SLIM:-0}" in
+  1|true|yes|on)
+    POST_SLIM_MODE=true
+    HOOK_CMD="$HOOK_CMD --post-slim"
+    ;;
+esac
 
 command -v jq   >/dev/null || { warn "jq is required"; exit 1; }
 command -v node >/dev/null || { warn "node is required"; exit 1; }
@@ -144,7 +151,7 @@ BACKUP="$SETTINGS.bak-$(date +%Y%m%d-%H%M%S)"
 cp "$SETTINGS" "$BACKUP"
 
 tmp="$(mktemp)"
-jq --arg cmd "$HOOK_CMD" "$DEJEV"'
+jq --arg cmd "$HOOK_CMD" --arg bin "$JEV_DIR/bin/jev-hook.mjs" --argjson postSlim "$POST_SLIM_MODE" "$DEJEV"'
   def entry($matcher; $timeout):
     { matcher: $matcher,
       hooks: [ { type: "command", command: $cmd, timeout: $timeout } ] };
@@ -158,6 +165,14 @@ jq --arg cmd "$HOOK_CMD" "$DEJEV"'
   # never spawns for tools it has nothing to say about.
   | .hooks.PreToolUse =
       ((.hooks.PreToolUse // [])) + [ entry("Bash|Edit|Write|NotebookEdit|Read"; 15) ]
+
+  # The opt-in Claude pilot handles successful Maven output after execution.
+  # Host-side `if` avoids launching a hook for unrelated Bash commands.
+  | if $postSlim then
+      .hooks.PostToolUse = ((.hooks.PostToolUse // [])) +
+        [ { matcher: "Bash", hooks: [{ type: "command", command: $bin,
+            args: ["--post-slim"], if: "Bash(mvn *)", timeout: 15 }] } ]
+    else . end
 
   # Triages errors from failing tools. PostToolUse fires only on success and
   # carries no error; failures arrive as PostToolUseFailure.
@@ -177,7 +192,11 @@ jq --arg cmd "$HOOK_CMD" "$DEJEV"'
 
 jq empty "$tmp" || { warn "refusing to write invalid JSON; settings untouched"; rm -f "$tmp"; exit 1; }
 mv "$tmp" "$SETTINGS"
-ok "PreToolUse, PostToolUseFailure, PreCompact and SessionStart registered"
+if [ "$POST_SLIM_MODE" = true ]; then
+  ok "PreToolUse, PostToolUse, PostToolUseFailure, PreCompact and SessionStart registered"
+else
+  ok "PreToolUse, PostToolUseFailure, PreCompact and SessionStart registered"
+fi
 
 mkdir -p "$BIN_DIR"
 ln -sfn "$JEV_DIR/bin/jev-slim.mjs" "$BIN_DIR/jev-slim"
@@ -221,6 +240,8 @@ cat <<EOF
     JEV_HOOKS=0            turn everything off
     JEV_HOOKS_SLIM=0       keep the guard, stop rewriting commands
     JEV_HOOKS_GUARD=0      keep slimming, stop guarding tool calls
+    JEV_CLAUDE_POST_SLIM=1 ./install.sh claude
+                           opt in to the Claude Code PostToolUse pilot
 
   Decisions are logged to ~/.local/state/jev-hooks/jev-log.jsonl —
   read it before trusting the default thresholds.

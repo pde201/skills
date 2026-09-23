@@ -26,7 +26,7 @@ absolute path and stop working when that directory is deleted.
 
 | Adapter | Config default / override | Implemented events |
 | --- | --- | --- |
-| Claude Code | `~/.claude/settings.json` / `CLAUDE_SETTINGS` | PreToolUse, PostToolUseFailure, PreCompact, SessionStart/compact |
+| Claude Code | `~/.claude/settings.json` / `CLAUDE_SETTINGS` | PreToolUse, PostToolUseFailure, PreCompact, SessionStart/compact; opt-in PostToolUse/Maven |
 | Codex | `${CODEX_HOME:-~/.codex}/hooks.json` / `CODEX_HOOKS` | PreToolUse, PostToolUse (PostToolUseFailure also accepted), UserPromptSubmit, PreCompact, SessionStart, SessionEnd |
 | Antigravity | `~/.gemini/config/hooks.json` / `JEV_ANTIGRAVITY_HOOKS`; tool matcher `JEV_ANTIGRAVITY_MATCHER` | PreToolUse, PreInvocation, PostToolUse, Stop |
 
@@ -48,6 +48,7 @@ names registered by its installer.
 
 - **Claude Code**:
   - **PreToolUse**: deterministic safety checks, git safety (force push and sensitive commit detection escalates to `ask`), command output slimming via `updatedInput.command`, and thrashing/goal drift warnings delivered to the model as `hookSpecificOutput.additionalContext`. (`systemMessage` is shown to the user only and carries the slimming notice.)
+  - **Opt-in Maven PostToolUse pilot**: `JEV_CLAUDE_POST_SLIM=1 ./install.sh claude` registers a Bash `PostToolUse` hook filtered by the host to Maven commands. For successful, eligible, long Maven stdout, Jev returns `updatedToolOutput` with the original stderr and other result fields. Maven commands are not rewritten; other commands retain the wrapper. Short output, failed tools, interrupted results, and host-truncated output stay untouched. Re-run `./install.sh claude` without the flag to restore the Maven wrapper and remove the pilot hook. This selection is written into the registered hook command; changing the environment alone does not switch an existing installation. Claude Code [documents `updatedToolOutput`](https://code.claude.com/docs/en/hooks#posttooluse-decision-control), but a direct synthetic event does not prove a particular host build applies the rewrite.
   - **PostToolUseFailure**: error triage classifying tool execution failures into structured categories and logging diagnostics. `PostToolUse` fires only after a successful call and carries `tool_response`, never an error, so it is not registered.
   - **PreCompact & SessionStart**: context harvesting and single-use carry-forward brief injection across compaction, bounded to the host's 10,000-character `additionalContext` cap with the full brief kept on disk.
 - **Codex**:
@@ -67,6 +68,15 @@ Restart the target host after registration or environment changes. Verify in
 three stages: registration; direct synthetic adapter event; real host tool call.
 Direct invocation cannot prove the host loaded/trusted the hook. Use harmless
 fixtures; never execute a destructive command to test a guard.
+
+The Claude Maven PostToolUse pilot must remain synchronous: an async hook cannot
+replace the result before Claude reads it. It may avoid the extra shell process
+and preserve native command behavior, but it still starts a hook process and
+may call the provider. Measure full tool wall time and output retention on the
+same workloads before claiming a speed gain. Claude Code may truncate the
+original result before Jev receives it, so the full-output copy is complete
+only relative to the hook input. The pilot skips the recognized truncation
+marker and leaves failures to the unmodified `PostToolUseFailure` path.
 
 Resolve `TYPESAFE_API_KEY` from the user's existing secret manager at launch.
 Check only whether it is present, never print its value or persist it in settings.

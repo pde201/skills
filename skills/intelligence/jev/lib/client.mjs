@@ -9,6 +9,7 @@
 // ──────────────────────────────────────────────────────────────────────
 
 import { readFileSync, unlinkSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { redactState, redactText, writePrivateFile } from "./privacy.mjs";
 import { stateDir } from "./log.mjs";
@@ -50,7 +51,18 @@ export function haveKey() {
 // own process. Provider failures and repeated authorization/edge
 // rejections count; malformed requests and answers are this layer's bugs.
 
-const breakerPath = () => join(stateDir(), "breaker.json");
+// Authentication and edge rejections can be credential-specific. A bad key in
+// one host must not open another host's breaker. The digest is a local lookup
+// key only; neither the credential nor the endpoint is written to disk.
+const breakerPath = () => {
+  const scope = createHash("sha256")
+    .update(ENDPOINT)
+    .update("\0")
+    .update(process.env.TYPESAFE_API_KEY ?? "")
+    .digest("hex")
+    .slice(0, 24);
+  return join(stateDir(), `breaker-${scope}.json`);
+};
 const breakerEnabled = () => Number.isFinite(config.breakerFailures) && config.breakerFailures > 0;
 
 function readBreaker() {

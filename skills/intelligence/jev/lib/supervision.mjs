@@ -46,16 +46,18 @@ const TEST_COMMAND_PATTERNS = [
  *
  * @param {object} opts
  * @param {string} opts.transcriptPath
+ * @param {object} [opts.transcriptSnapshot] parsed transcript shared by the hook
  * @param {string} [opts.latestRequest]
  * @returns {Promise<{warning: string|null, thrashing?: number, goalDrift?: number}>}
  */
-export async function checkGoalDriftAndThrashing({ transcriptPath, latestRequest } = {}) {
+export async function checkGoalDriftAndThrashing({ transcriptPath, transcriptSnapshot, latestRequest } = {}) {
   if (!config.supervision) return { warning: null };
 
-  const calls = recentToolCalls(transcriptPath, { limit: 8 });
+  const source = transcriptSnapshot ?? transcriptPath;
+  const calls = recentToolCalls(source, { limit: 8 });
   if (calls.length < 3) return { warning: null };
 
-  const task = latestRequest || latestUserRequest(transcriptPath);
+  const task = latestRequest || latestUserRequest(source);
   if (!task) return { warning: null };
 
   // Look for repeated errors or identical tool invocations. A call is the
@@ -132,16 +134,18 @@ export async function checkGoalDriftAndThrashing({ transcriptPath, latestRequest
  *
  * @param {object} opts
  * @param {string} opts.transcriptPath
+ * @param {object} [opts.transcriptSnapshot] parsed transcript shared by the hook
  * @param {string} [opts.latestRequest]
  * @param {number} [opts.timeoutMs]  per-attempt budget for the model call
  * @param {number} [opts.retries]    hosts that cap this event short pass 0
  * @returns {Promise<{allow: boolean, reason?: string}>}
  */
-export async function checkDefinitionOfDone({ transcriptPath, latestRequest, timeoutMs = 2500, retries } = {}) {
+export async function checkDefinitionOfDone({ transcriptPath, transcriptSnapshot, latestRequest, timeoutMs = 2500, retries } = {}) {
   if (!config.dodGate) return { allow: true };
 
-  const calls = recentToolCalls(transcriptPath, { limit: 50 });
-  const task = latestRequest || latestUserRequest(transcriptPath);
+  const source = transcriptSnapshot ?? transcriptPath;
+  const calls = recentToolCalls(source, { limit: 50 });
+  const task = latestRequest || latestUserRequest(source);
 
   // Identify if any modification tools were executed
   let lastEditIndex = -1;

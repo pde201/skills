@@ -120,6 +120,32 @@ test("401 authorization rejection is breaker-eligible while 422 remains a local 
   assert.equal(breakerStatus().failures, 1, "a malformed-request diagnostic does not add a breaker failure");
 });
 
+test("a rejected credential cannot open another credential's breaker", async () => {
+  const originalKey = process.env.TYPESAFE_API_KEY;
+  try {
+    process.env.TYPESAFE_API_KEY = "rejected-test-key";
+    resetBreaker();
+    globalThis.fetch = async () => ({ ok: false, status: 401, async text() { return "unauthorized"; } });
+    for (let i = 0; i < 3; i++) await assert.rejects(systemOne({ state: "hi", questions: question() }), /TypeSafe 401/);
+    assert.equal(breakerStatus().open, true);
+
+    process.env.TYPESAFE_API_KEY = "working-test-key";
+    resetBreaker();
+    assert.equal(breakerStatus().open, false);
+    globalThis.fetch = healthy;
+    await systemOne({ state: "hi", questions: question() });
+    assert.equal(breakerStatus().failures, 0);
+
+    process.env.TYPESAFE_API_KEY = "rejected-test-key";
+    assert.equal(breakerStatus().open, true, "the bad key's cooldown remains isolated");
+  } finally {
+    resetBreaker();
+    process.env.TYPESAFE_API_KEY = "working-test-key";
+    resetBreaker();
+    process.env.TYPESAFE_API_KEY = originalKey;
+  }
+});
+
 test("client errors and malformed answers are this layer's bugs and do not count", async () => {
   resetBreaker();
   globalThis.fetch = async () => ({ ok: false, status: 422, async text() { return "bad request"; } });

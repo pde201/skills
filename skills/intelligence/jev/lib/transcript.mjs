@@ -40,6 +40,26 @@ function readEntries(path) {
   return entries;
 }
 
+// A hook can need several views of the same transcript. Keep the parsed
+// entries, and the derived tool calls, together so those views never reopen
+// or reparse a multi-megabyte JSONL file. The marker is private so an ordinary
+// path-like value cannot accidentally be treated as a snapshot.
+const SNAPSHOT_MARKER = Symbol("jev transcript snapshot");
+
+export function createTranscriptSnapshot(path) {
+  return {
+    [SNAPSHOT_MARKER]: true,
+    path,
+    entries: readEntries(path),
+    calls: null,
+    userActions: null,
+  };
+}
+
+const isTranscriptSnapshot = (value) => Boolean(value && value[SNAPSHOT_MARKER] === true);
+const entriesFor = (source) => isTranscriptSnapshot(source) ? source.entries : readEntries(source);
+const snapshotFor = (source) => isTranscriptSnapshot(source) ? source : createTranscriptSnapshot(source);
+
 const textOf = (content) => {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return "";
@@ -95,7 +115,7 @@ const isUserTurn = (entry) =>
 
 /** The most recent thing the human actually asked for. */
 export function latestUserRequest(path, { maxChars = 1500 } = {}) {
-  const entries = readEntries(path);
+  const entries = entriesFor(path);
   for (let i = entries.length - 1; i >= 0; i--) {
     if (!isUserTurn(entries[i])) continue;
     const raw = textOf(entries[i].message?.content ?? entries[i].content);
@@ -187,7 +207,7 @@ const boundedText = (value, limit) => {
 
 /** The current request, with recent user directions when it amends ongoing work. */
 export function activeTaskContext(path, { latestPrompt = "", maxChars = 2000 } = {}) {
-  const entries = readEntries(path);
+  const entries = entriesFor(path);
   const turns = [];
   let latestEntryIndex = -1;
   for (let index = 0; index < entries.length; index++) {
@@ -248,8 +268,11 @@ export function activeTaskContext(path, { latestPrompt = "", maxChars = 2000 } =
 
 /** Confirmed user-run pushes are observed state, never a new instruction. */
 export function recentUserActions(path) {
+  const snapshot = isTranscriptSnapshot(path) ? path : null;
+  if (snapshot?.userActions) return snapshot.userActions.slice();
+
   const actions = [];
-  for (const entry of readEntries(path)) {
+  for (const entry of entriesFor(path)) {
     if (entry?.origin?.kind !== "human" || entry?.isMeta === true) continue;
     const raw = textOf(entry.message?.content ?? entry.content);
     const userText = extractUserText(raw);
@@ -266,22 +289,32 @@ export function recentUserActions(path) {
       actions.push(`User-run git push to origin/${branch} succeeded${update?.[2] ? ` at ${update[2]}` : ""}`);
     }
   }
-  return [...new Set(actions)].slice(-3);
+  const result = [...new Set(actions)].slice(-3);
+  if (snapshot) snapshot.userActions = result;
+  return result.slice();
 }
 
 /** Recent tool calls and whether they failed — the context for "is this a repeat?". */
-export function recentToolCalls(path, { limit = 12 } = {}) {
-  const entries = readEntries(path);
+function parseToolCalls(entries) {
   const calls = [];
+  const callsById = new Map();
+  const addCall = (call) => {
+    calls.push(call);
+    // Array.find used to select the first matching call. Retain that behavior
+    // for malformed transcripts with duplicate IDs while keeping association
+    // linear for normal transcripts.
+    if (!callsById.has(call.id)) callsById.set(call.id, call);
+  };
+
   for (const entry of entries) {
     // Claude Code / Codex format
     const content = entry?.message?.content ?? entry?.content;
     if (Array.isArray(content)) {
       for (const part of content) {
         if (part?.type === "tool_use") {
-          calls.push({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), paths: temporaryPaths(part.input), signature: callSignature(part.name, part.input), failed: false, id: part.id });
+          addCall({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), paths: temporaryPaths(part.input), signature: callSignature(part.name, part.input), failed: false, id: part.id });
         } else if (part?.type === "tool_result") {
-          const call = calls.find((c) => c.id === part.tool_use_id);
+          const call = callsById.get(part.tool_use_id);
           if (call) {
             call.failed = Boolean(part.is_error);
             call.result = textOf(part.content).slice(0, 300);
@@ -296,7 +329,7 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
         const id = call.id ?? String(entry.step_index ?? Math.random());
         const failed = Boolean(entry?.status === "ERROR" || call?.status === "ERROR" || call?.is_error || entry?.is_error);
         const args = call.args ?? call.input;
-        calls.push({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), paths: temporaryPaths(args), signature: callSignature(call.name, args), failed, id });
+        addCall({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), paths: temporaryPaths(args), signature: callSignature(call.name, args), failed, id });
       }
     } else if (entry?.source === "MODEL" && entry?.type === "GENERIC" && calls.length > 0) {
       const lastCall = calls[calls.length - 1];
@@ -306,6 +339,14 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
       }
     }
   }
+  return calls;
+}
+
+export function recentToolCalls(path, { limit = 12 } = {}) {
+  const snapshot = isTranscriptSnapshot(path) ? path : null;
+  const calls = snapshot
+    ? (snapshot.calls ??= parseToolCalls(snapshot.entries))
+    : parseToolCalls(entriesFor(path));
   return calls.slice(-limit).map(({ id, ...rest }) => rest);
 }
 
@@ -382,6 +423,23 @@ export function observedPaths(path) {
     if (/^\/|^\.\//.test(call.input)) seen.add(call.input);
   }
   return [...seen].slice(0, 200);
+}
+
+/**
+ * Build every transcript-derived value a PreToolUse hook commonly needs.
+ * Passing a path is supported for callers outside a hook; hook adapters pass
+ * a snapshot so all views share one read and one tool-call parse.
+ */
+export function transcriptContext(source, { latestPrompt = "", maxChars = 2000 } = {}) {
+  const snapshot = snapshotFor(source);
+  return {
+    snapshot,
+    task: activeTaskContext(snapshot, { latestPrompt, maxChars }),
+    recentCalls: recentToolCalls(snapshot),
+    recentUserActions: recentUserActions(snapshot),
+    observed: observedPaths(snapshot),
+    writtenDirs: writtenDirs(snapshot),
+  };
 }
 
 export { readEntries };

@@ -34,7 +34,7 @@ import {
   triageToolError,
   checkGitSafety,
 } from "../lib/supervision.mjs";
-import { activeTaskContext, recentToolCalls, recentUserActions, observedPaths, writtenDirs } from "../lib/transcript.mjs";
+import { createTranscriptSnapshot, transcriptContext, recentToolCalls } from "../lib/transcript.mjs";
 import { logDecision, stateDir } from "../lib/log.mjs";
 import { writePrivateFile } from "../lib/privacy.mjs";
 import config from "../lib/config.mjs";
@@ -118,7 +118,9 @@ async function preToolUse(event) {
   const { toolCall, workspacePaths, transcriptPath } = event;
   const { toolName, input } = translate(toolCall);
   const cwd = toolCall?.args?.Cwd || workspacePaths?.[0] || process.cwd();
-  const task = activeTaskContext(transcriptPath);
+  const hookStarted = Date.now();
+  const transcript = transcriptContext(createTranscriptSnapshot(transcriptPath));
+  const { snapshot: transcriptSnapshot, task, recentCalls, recentUserActions, observed, writtenDirs } = transcript;
   const started = Date.now();
 
   // Git safety check on commits and pushes
@@ -135,6 +137,7 @@ async function preToolUse(event) {
         gitSafety: true,
         decision: gitCheck.decision,
         reason: gitCheck.reason,
+        hook_ms: Date.now() - hookStarted,
       });
       if (gitCheck.decision === "deny") return emit({ decision: "deny", reason: gitCheck.reason });
       if (gitCheck.decision === "ask") return emit({ decision: "ask", reason: gitCheck.reason });
@@ -148,30 +151,43 @@ async function preToolUse(event) {
       input,
       cwd,
       task,
-      recentCalls: recentToolCalls(transcriptPath),
-      recentUserActions: recentUserActions(transcriptPath),
-      observed: observedPaths(transcriptPath),
+      recentCalls,
+      recentUserActions,
+      observed,
       // Antigravity names its workspace folders; they are the workspace.
       hostRoots: Array.isArray(workspacePaths) ? workspacePaths : [],
-      writtenDirs: writtenDirs(transcriptPath),
+      writtenDirs,
     });
 
-    logDecision({
-      agent: "antigravity",
-      hook: "PreToolUse",
-      tool: toolCall?.name,
-      mapped_to: toolName,
-      decision: verdict.decision,
-      by: verdict.by,
-      reason: verdict.reason,
-      signals: verdict.signals,
-      probabilities: verdict.probabilities,
-      ms: Date.now() - started,
-      cost_usd: verdict.cost,
-    });
+  }
 
-    if (verdict.decision === DENY) return emit({ decision: "deny", reason: verdict.reason });
-    if (verdict.decision === ASK) return emit({ decision: "ask", reason: verdict.reason });
+  const guardMs = Date.now() - started;
+  const logVerdict = (extra = {}) => logDecision({
+    agent: "antigravity",
+    hook: "PreToolUse",
+    tool: toolCall?.name,
+    mapped_to: toolName,
+    decision: verdict.decision,
+    by: verdict.by,
+    reason: verdict.reason,
+    signals: verdict.signals,
+    probabilities: verdict.probabilities,
+    // `ms` keeps its historical meaning: time after transcript/task parsing.
+    ms: guardMs,
+    // `hook_ms` is recorded at the final branch so it covers the complete
+    // PreToolUse path, including transcript parsing and command rewriting.
+    hook_ms: Date.now() - hookStarted,
+    cost_usd: verdict.cost,
+    ...extra,
+  });
+
+  if (config.guard && verdict.decision === DENY) {
+    logVerdict();
+    return emit({ decision: "deny", reason: verdict.reason });
+  }
+  if (config.guard && verdict.decision === ASK) {
+    logVerdict();
+    return emit({ decision: "ask", reason: verdict.reason });
   }
 
   // Allowed. Check if this is a command whose output is going to be bloat.
@@ -180,20 +196,27 @@ async function preToolUse(event) {
     const { wrap, why } = shouldWrap(command);
     if (wrap) {
       const updated = rewrite(command, task, { key: event.conversationId || event.session_id });
-      logDecision({
-        agent: "antigravity",
-        hook: "PreToolUse",
-        tool: "run_command",
-        wrapped: true,
-        matched: why,
-        command: command.slice(0, 200),
-      });
+      if (config.guard) {
+        logVerdict({ tool: "run_command", wrapped: true, matched: why, command: command.slice(0, 200) });
+      } else {
+        logDecision({
+          agent: "antigravity",
+          hook: "PreToolUse",
+          tool: "run_command",
+          wrapped: true,
+          matched: why,
+          command: command.slice(0, 200),
+          hook_ms: Date.now() - hookStarted,
+        });
+      }
       // In Antigravity, PreToolUse output requires a valid `decision`. If JSON
       // is emitted without `decision`, Antigravity fails closed and denies the call.
       // Emitting decision: "allow" alongside `overwrite` allows the rewritten command to proceed.
       return emit({ decision: "allow", overwrite: { CommandLine: updated } });
     }
   }
+
+  if (config.guard) logVerdict();
 
   return EXPLICIT_ALLOW ? emit({ decision: "allow" }) : nothing();
 }
@@ -216,7 +239,8 @@ async function preInvocation(event) {
   // Goal drift and thrashing detection
   if (config.supervision && event.transcriptPath) {
     try {
-      const { warning } = await checkGoalDriftAndThrashing({ transcriptPath: event.transcriptPath });
+      const transcriptSnapshot = createTranscriptSnapshot(event.transcriptPath);
+      const { warning } = await checkGoalDriftAndThrashing({ transcriptPath: event.transcriptPath, transcriptSnapshot });
       if (warning) {
         logDecision({ agent: "antigravity", hook: "PreInvocation", thrashingWarning: true });
         steps.push({ ephemeralMessage: warning });
@@ -274,8 +298,10 @@ async function stopHook(event) {
 
   const key = event.conversationId || event.transcriptPath || "unknown";
   try {
+    const transcriptSnapshot = createTranscriptSnapshot(event.transcriptPath);
     const res = await checkDefinitionOfDone({
       transcriptPath: event.transcriptPath,
+      transcriptSnapshot,
     });
 
     if (res.allow) {
@@ -319,7 +345,8 @@ async function stopHook(event) {
 async function postToolUse(event) {
   if (event.error) {
     try {
-      const recent = recentToolCalls(event.transcriptPath, { limit: 1 })[0];
+      const transcriptSnapshot = createTranscriptSnapshot(event.transcriptPath);
+      const recent = recentToolCalls(transcriptSnapshot, { limit: 1 })[0];
       await triageToolError({
         toolName: recent?.tool || "tool",
         input: recent?.input || "",

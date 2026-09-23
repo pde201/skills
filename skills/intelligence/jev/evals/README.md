@@ -120,3 +120,30 @@ node evals/runner.mjs --mode live --input /path/to/held-out-live-traces.json --f
 ```
 
 With no live input, `--mode live` reports `unmeasured` and exits `2`. It does not contact a provider and cannot pass by default. Threshold calibration must use a pre-registered sample plan and holdout labels; the five-log case intentionally records insufficient evidence and forbids a threshold update.
+
+## Paired task-context judgment check
+
+`task-context-cases.json` contains labeled synthetic tool calls based on the kinds
+of `intent_mismatch` false interruptions seen in local decision records. The
+labels never enter the provider request. The paired check compares the old
+latest-message-only task text with recent user directions for continuations,
+option selections, and scope amendments. The newest direction overrides older
+ones. It also includes sibling worktree setup, Git preflight, unrelated edits,
+and new-task corrections to check for missed hazards and stale scope.
+
+```bash
+JEV_RETRIES=0 npm run eval:task-context -- --live --repetitions 2
+JEV_RETRIES=0 npm run eval:task-context -- --live --repetitions 2 --json > task-context-report.json
+```
+
+This opt-in check requires `TYPESAFE_API_KEY` and makes live provider calls.
+Without both the key and `--live`, it exits `2` as unmeasured. Record false
+interruptions and missed hazards separately for baseline and revised context;
+provider scores can vary across repetitions. These synthetic judgments test
+the provider and context assembly, not end-to-end Claude/Codex/Antigravity UI
+behavior. Keep any real transcript and decision-log replay private, and label
+its edits independently before claiming a measured production false-positive
+rate.
+
+The initial paired run and its limits are recorded in
+[task-context-results.md](task-context-results.md).

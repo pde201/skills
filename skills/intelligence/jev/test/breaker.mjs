@@ -20,8 +20,12 @@ const { systemOne, noul, JevUnavailable, breakerStatus, resetBreaker } = await i
 const { guard, ALLOW } = await import("../lib/guard.mjs");
 
 const originalFetch = globalThis.fetch;
+const originalNow = Date.now;
+let now = originalNow();
+Date.now = () => now;
 test.after(() => {
   globalThis.fetch = originalFetch;
+  Date.now = originalNow;
 });
 
 const question = () => ({ q: noul("Is `text` a greeting?") });
@@ -35,7 +39,7 @@ const healthy = async () => {
   calls++;
   return { ok: true, status: 200, async json() { return okResponse; }, async text() { return ""; } };
 };
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const advance = (ms) => { now += ms; };
 const tripBreaker = async () => {
   for (let i = 0; i < 3; i++) await assert.rejects(systemOne({ state: "hi", questions: question() }), /TypeSafe 503/);
 };
@@ -56,7 +60,7 @@ test("three consecutive provider failures open the circuit; the next call is ref
 });
 
 test("after the cooldown one trial request goes through, and a success closes the circuit", async () => {
-  await sleep(250);
+  advance(250);
   assert.equal(breakerStatus().open, false, "the cooldown has passed");
   calls = 0;
   globalThis.fetch = healthy;
@@ -70,7 +74,7 @@ test("a failed trial re-opens the circuit for another cooldown", async () => {
   resetBreaker();
   globalThis.fetch = failing;
   await tripBreaker();
-  await sleep(250);
+  advance(250);
   calls = 0;
   await assert.rejects(systemOne({ state: "hi", questions: question() }), /TypeSafe 503/);
   assert.equal(calls, 1, "the trial request was made");

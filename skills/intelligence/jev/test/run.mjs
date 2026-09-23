@@ -842,6 +842,7 @@ test("antigravity: a catastrophic command asks before it runs", () => {
 test("antigravity: reading a file that does not exist is denied", () => {
   const result = runAgy(agyCall("view_file", { AbsolutePath: "/definitely/not/here.ts" }));
   assert.equal(result.decision, "deny");
+  assert.match(result.reason, /^Jev blocked call \(local check\):/);
   assert.match(result.reason, /does not exist/);
 });
 
@@ -1424,12 +1425,15 @@ test("a Read is judged by code alone: ordinary files pass with no model call, cr
   for (const path of [envFile, pem]) {
     const result = runHook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: path } }, env);
     assert.equal(result.hookSpecificOutput.permissionDecision, "ask", path);
+    assert.match(result.hookSpecificOutput.permissionDecisionReason, /^Jev approval request \(local check\):/);
     assert.match(result.hookSpecificOutput.permissionDecisionReason, /usually holds credentials/);
   }
   assert.equal(runHook({ hook_event_name: "PreToolUse", tool_name: "Read", tool_input: { file_path: template } }, env), null, "a template is not a credential");
 
   // Antigravity's view_file maps to Read and gets the same treatment.
-  assert.equal(runAgy(agyCall("view_file", { AbsolutePath: envFile }), env)?.decision, "ask");
+  const agyResult = runAgy(agyCall("view_file", { AbsolutePath: envFile }), env);
+  assert.equal(agyResult?.decision, "ask");
+  assert.match(agyResult.reason, /^Jev approval request \(local check\):/);
 
   // The model path is still there for anyone who wants it back.
   before = logCount();
@@ -1438,7 +1442,7 @@ test("a Read is judged by code alone: ordinary files pass with no model call, cr
   assert.equal(record.reason, "no api key", "with the switch on and no key, the model path was attempted");
 });
 
-const { latestUserRequest, stripInjectedBlocks } = await import("../lib/transcript.mjs");
+const { activeTaskContext, latestUserRequest, stripInjectedBlocks } = await import("../lib/transcript.mjs");
 
 test("latestUserRequest drops host-injected blocks and keeps what the user typed", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-injected-"));
@@ -1460,4 +1464,74 @@ test("latestUserRequest drops host-injected blocks and keeps what the user typed
   assert.equal(stripInjectedBlocks("question\n\n<system-reminder>x</system-reminder>"), "question");
   assert.equal(stripInjectedBlocks("<task-notification>\nstill open"), "", "an unterminated injected block is not a request");
   assert.equal(stripInjectedBlocks("<request>keep me</request>"), "<request>keep me</request>", "unknown tags are the user's own");
+});
+
+test("active task context carries a substantive request through brief follow-ups", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-active-task-"));
+  const path = join(dir, "transcript.jsonl");
+  const entries = [
+    { type: "user", message: { role: "user", content: "Update the parser and its tests." } },
+    { type: "user", message: { role: "user", content: "Continue." } },
+    { type: "user", message: { role: "user", content: "Please continue, but keep the API unchanged." } },
+  ];
+  writeFileSync(path, entries.map((entry) => JSON.stringify(entry)).join("\n"));
+  const task = activeTaskContext(path);
+  assert.match(task, /Recent user directions \(oldest first; latest overrides\)/);
+  assert.match(task, /Update the parser and its tests/);
+  assert.match(task, /Latest user direction:\nPlease continue, but keep the API unchanged/);
+  assert.ok(task.indexOf("Update the parser and its tests") < task.indexOf("Continue."));
+
+  assert.match(activeTaskContext(path, { latestPrompt: "Go on and update the test." }), /Update the parser and its tests/);
+  assert.equal(activeTaskContext(path, { latestPrompt: "Instead, review the README only." }), "Instead, review the README only.");
+  assert.equal(activeTaskContext(path, { latestPrompt: "Stop." }), "Stop.");
+  assert.match(activeTaskContext(path, { latestPrompt: "Stop after the regression tests pass." }), /Update the parser and its tests/);
+  assert.equal(activeTaskContext(path, { latestPrompt: "Hello." }), "Hello.");
+});
+
+test("continuing after a replacement task cannot revive the cancelled task", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-reset-task-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, [
+    "Implement the payment endpoint.",
+    "Instead, update README.md only.",
+    "Continue.",
+  ].map((content) => JSON.stringify({ type: "user", message: { role: "user", content } })).join("\n"));
+  const task = activeTaskContext(path);
+  assert.match(task, /update README\.md only/);
+  assert.doesNotMatch(task, /payment endpoint/);
+});
+
+test("scope steering retains earlier user directions without reviving a replaced task", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-steering-task-"));
+  const path = join(dir, "transcript.jsonl");
+  const turns = [
+    "Implement backend verification and add tests. Do not change public APIs.",
+    "Option A",
+    "Once the condition is done, use the native add-document flow.",
+    "Let's park the related UI change for now.",
+    "[Request interrupted by user for tool use]",
+  ];
+  writeFileSync(path, turns.map((content) => JSON.stringify({ type: "user", message: { role: "user", content } })).join("\n"));
+  const task = activeTaskContext(path);
+  assert.match(task, /Implement backend verification and add tests/);
+  assert.match(task, /Option A/);
+  assert.match(task, /native add-document flow/);
+  assert.match(task, /Latest user direction:\nLet's park the related UI change/);
+  assert.doesNotMatch(task, /Request interrupted/);
+  assert.equal(activeTaskContext(path, { latestPrompt: "Instead, review the README only." }), "Instead, review the README only.");
+});
+
+test("active task context keeps the current direction and the end of a long task", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-active-task-long-"));
+  const path = join(dir, "transcript.jsonl");
+  const original = `Implement the parser. ${"Background details. ".repeat(120)} Never edit credentials.`;
+  writeFileSync(path, [
+    { type: "user", message: { role: "user", content: original } },
+    { type: "user", message: { role: "user", content: "Continue, and add regression tests." } },
+  ].map((entry) => JSON.stringify(entry)).join("\n"));
+  const task = activeTaskContext(path, { maxChars: 500 });
+  assert.ok(task.length <= 500);
+  assert.match(task, /Implement the parser/);
+  assert.match(task, /Never edit credentials/);
+  assert.match(task, /Latest user direction:\nContinue, and add regression tests/);
 });

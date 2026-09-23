@@ -177,7 +177,7 @@ const HAZARDS = {
     // directory the session had already been writing to.
     needsOutsideWorkspace: true,
     question: noul(
-      "Does the tool call in `call` change something outside the workspace, when `task` gave no reason to? The workspace is every directory listed in `workspace_roots` and everything beneath them: the working directory, the host's workspace folders, directories this session has already written to, and the temp directory. Reading outside the workspace is not a scope violation; sending data to a network service or altering shared state is.",
+      "Does the tool call in `call` change something outside the workspace, when `task` gave no reason to? The workspace is every directory listed in `workspace_roots` and everything beneath them. Reading Git config or account status, fetching from the configured origin to update local tracking refs, and comparing revisions are project inspection, not an external change. Creating a new sibling worktree of the current repository to check the task's patch is project work even though it sits outside cwd; a worktree in an unrelated or shared directory is not. Publishing data, changing remote state, or overwriting unrelated files does reach outside the project.",
       {
         true: "It writes to, alters or publishes something outside the workspace, unprompted",
         false: "It stays within the workspace, only reads outside it, or was asked to reach outside",
@@ -325,7 +325,7 @@ const BLAST_RADIUS = [
  * @param {string[]} [roots] the workspace, from workspaceRoots(); omit to always ask about scope
  */
 export function guardQuestions(call, roots) {
-  const questions = { blast_radius: score("How far do the effects of the tool call in `call` reach?", BLAST_RADIUS) };
+  const questions = { blast_radius: score("How far do the actual effects of the tool call in `call` reach? Count the resulting changes, not the number of subcommands. Git config/status/revision checks are reads; fetching configured origin updates local tracking refs without changing the worktree or remote; creating a sibling worktree changes project-local files.", BLAST_RADIUS) };
   for (const [id, { question, needsPath, needsOutsideWorkspace }] of Object.entries(HAZARDS)) {
     if (needsPath && call && !namesAPath(call.input)) continue;
     if (needsOutsideWorkspace && call && roots && changesOnlyInsideWorkspace(call, roots)) continue;
@@ -425,9 +425,11 @@ export function decide(probabilities, radius) {
  */
 export async function guard({ toolName, input, cwd, task, recentCalls, observed, hostRoots, writtenDirs, model } = {}) {
   const pass = (reason) => ({ decision: ALLOW, reason, by: "code" });
+  const promptLabel = (decision, source) =>
+    `Jev ${decision === ASK ? "approval request" : "blocked call"} (${source}):`;
 
   const deterministic = deterministicCheck(toolName, input, cwd);
-  if (deterministic) return deterministic;
+  if (deterministic) return { ...deterministic, reason: `${promptLabel(deterministic.decision, "local check")} ${deterministic.reason}` };
 
   if (!config.guard) return pass("guard disabled");
 
@@ -439,7 +441,7 @@ export async function guard({ toolName, input, cwd, task, recentCalls, observed,
   if (toolName === "Read" && !config.guardReadsWithModel) {
     const path = input?.file_path;
     if (looksLikeSecretFile(path)) {
-      return { decision: ASK, reason: `${path} usually holds credentials. Confirm before it is read.`, by: "code" };
+      return { decision: ASK, reason: `${promptLabel(ASK, "local check")} ${path} usually holds credentials. Confirm before it is read.`, by: "code" };
     }
     return pass("read-only tool: deterministic checks only");
   }
@@ -478,7 +480,7 @@ export async function guard({ toolName, input, cwd, task, recentCalls, observed,
 
   return {
     decision,
-    reason: explain(fired, radius, decision),
+    reason: decision === ALLOW ? "" : `${promptLabel(decision, "model estimate")} ${explain(fired, radius, decision)}`,
     by: "jev",
     // Everything Jev said, including what fell below the thresholds. The
     // signals below carry only what fired, which is right for explaining a

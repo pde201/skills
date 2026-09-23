@@ -14,6 +14,7 @@ process.env.JEV_RETRIES = "0";
 process.env.JEV_BREAKER_FAILURES = "0";
 
 const { JevUnavailable, choice, noul, score, systemOne } = await import("../lib/client.mjs");
+const { guard } = await import("../lib/guard.mjs");
 const { SHAPES, slim } = await import("../lib/slim.mjs");
 const { logDecision, stateDir } = await import("../lib/log.mjs");
 
@@ -126,6 +127,29 @@ test("a valid typed response still slims and preserves the full output privately
   assert.equal(readFileSync(result.fullPath, "utf8"), hundredLines);
   assert.equal(statSync(result.fullPath).mode & 0o777, 0o600);
   assert.equal(statSync(dirname(result.fullPath)).mode & 0o777, 0o700);
+});
+
+test("model approval prompts identify Jev and the model estimate", async () => {
+  installMock((_url, options) => {
+    const request = JSON.parse(options.body);
+    const answers = Object.fromEntries(Object.entries(request.questions).map(([id, question]) => {
+      if (question.type === "noul") return [id, { type: "noul", noul: id === "intent_mismatch" ? 0.6 : 0 }];
+      const legend = Object.fromEntries(question.criteria.map((label, index) => [String(index), label]));
+      const probabilities = Object.fromEntries(question.criteria.map((_, index) => [String(index), index === 1 ? 1 : 0]));
+      return [id, { type: "score", score: 1, legend, probabilities }];
+    }));
+    return { model: "jev-test", answers, usage: { input_tokens: 1, output_tokens: 1 } };
+  });
+  const verdict = await guard({
+    toolName: "Write",
+    input: { file_path: join(stateRoot, "example.txt"), content: "new content" },
+    cwd: stateRoot,
+    task: "Update the documentation",
+  });
+  assert.equal(verdict.decision, "ask");
+  assert.equal(verdict.by, "jev");
+  assert.match(verdict.reason, /^Jev approval request \(model estimate\):/);
+  assert.match(verdict.reason, /does not match what was asked for \(0\.60\)/);
 });
 
 test("outbound state redacts fields, credential blocks, SSNs, and free text", async () => {

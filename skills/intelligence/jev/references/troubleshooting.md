@@ -49,6 +49,19 @@ file and `JEV_STATE_DIR` selects the state directory. Record shapes vary by even
 hazards and `not_asked` records inapplicable questions. Inspect `by` to distinguish
 code from model decisions. A log entry alone is not a ground-truth label.
 
+Guard interruptions name their source in the host prompt:
+`Jev approval request (model estimate)` or
+`Jev approval request (local check)`. Blocks say `Jev blocked call` instead.
+These are Jev decisions; the host may still apply its own permission prompt.
+The model estimate compares an edit with the current task text. For brief
+follow-ups such as “continue,” option selections, and scope amendments, Jev
+includes recent user directions in chronological order and treats the latest
+direction as controlling. Independent new requests stand alone, and explicit
+replacement instructions end the older task context. If `intent_mismatch`
+repeatedly questions ordinary edits, check that this context captures the
+active task before changing the threshold. Decision logs record scores and
+reasons, not the full task text or independently verified labels.
+
 Read-only calls suppress most model hazards, but credential exposure and repeat
 failure remain relevant. Deterministic checks run before model judgments.
 Unknown or malformed model responses must not silently trim output.
@@ -59,6 +72,14 @@ had already written to, the temp directory, and `JEV_WORKSPACE_ROOTS`. Inside
 them the question is not asked at all and `signals.not_asked` says so. If a
 directory you work in keeps drawing asks, add it to `JEV_WORKSPACE_ROOTS`
 rather than raising `JEV_GUARD_ASK_AT`, which lowers every hazard at once.
+
+For shell calls, `wrong_scope` stays in the question batch because a command
+may have effects beyond its named path. The judgment should still treat a new
+sibling worktree of the current repository and routine Git preflight (`git
+config`, account status, `git fetch origin`, revision comparison) as project
+work. A worktree in an unrelated shared directory and a command that exposes
+an auth token remain hazards. Check the actual command and user request before
+labeling a prompt false.
 
 ## Tune from evidence
 

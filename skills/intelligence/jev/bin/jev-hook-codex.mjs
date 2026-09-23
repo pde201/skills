@@ -43,7 +43,7 @@ import {
   triageToolError,
   checkGitSafety,
 } from "../lib/supervision.mjs";
-import { latestUserRequest, recentToolCalls, observedPaths, writtenDirs } from "../lib/transcript.mjs";
+import { activeTaskContext, recentToolCalls, observedPaths, writtenDirs } from "../lib/transcript.mjs";
 import { logDecision, stateDir } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
 
@@ -112,9 +112,9 @@ function dropPrompt(sessionId) {
   }
 }
 
-/** The stash is authoritative; the transcript is the fallback. */
+/** The stash supplies the newest prompt; the transcript supplies its task anchor. */
 const taskFor = (event) =>
-  readStashedPrompt(event.session_id) || latestUserRequest(event.transcript_path);
+  activeTaskContext(event.transcript_path, { latestPrompt: readStashedPrompt(event.session_id) });
 
 // ── Command shape ────────────────────────────────────────────────────
 

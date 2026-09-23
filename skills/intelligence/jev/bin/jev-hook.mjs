@@ -19,7 +19,7 @@ import {
   triageToolError,
   checkGitSafety,
 } from "../lib/supervision.mjs";
-import { latestUserRequest, recentToolCalls, observedPaths, writtenDirs } from "../lib/transcript.mjs";
+import { activeTaskContext, recentToolCalls, observedPaths, writtenDirs } from "../lib/transcript.mjs";
 import { logDecision } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
 
@@ -43,7 +43,7 @@ const nothing = () => process.exit(0);
 
 async function preToolUse(event) {
   const { tool_name: toolName, tool_input: input, cwd, transcript_path: transcriptPath } = event;
-  const task = latestUserRequest(transcriptPath);
+  const task = activeTaskContext(transcriptPath);
   const started = Date.now();
 
   // Git safety check on commits and pushes

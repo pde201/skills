@@ -70,6 +70,7 @@ const extractUserText = (raw) => {
   const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
   if (match) return match[1].trim();
   const text = stripInjectedBlocks(raw);
+  if (/^\[Request interrupted by user(?: for tool use)?\]$/.test(text)) return "";
   // Claude/Codex tool results arrive shaped as user turns; skip them
   if (text.startsWith("<") && !text.startsWith("<USER_REQUEST>")) return "";
   return text;
@@ -93,6 +94,49 @@ export function latestUserRequest(path, { maxChars = 1500 } = {}) {
     return text.slice(0, maxChars);
   }
   return "";
+}
+
+// Short steering and selection replies depend on the preceding task. An
+// independent request stands alone so old work cannot silently widen it.
+const FOLLOWUP = /^(?:please\s+)?(?:continue|resume|proceed|keep going|go on|carry on|go ahead|do it|option\s+[a-z0-9]+|yes\b|okay\b|ok\b|agreed\b|confirm all\b|let'?s park\b|park\b|once\b|also\b|but\b|and\b|stop after\b|stop when\b)\b/i;
+const RESET_TASK = /^(?:instead\b|forget\b|new task\b|switch to\b|stop(?:[.!?]?\s*$| working on\b))/i;
+
+const boundedText = (value, limit) => {
+  if (value.length <= limit) return value;
+  const marker = "\n[earlier task text omitted]\n";
+  if (limit <= marker.length) return value.slice(-limit);
+  const available = Math.max(0, limit - marker.length);
+  const head = Math.ceil(available / 2);
+  return `${value.slice(0, head)}${marker}${value.slice(-Math.floor(available / 2))}`;
+};
+
+/** The current request, with recent user directions when it amends ongoing work. */
+export function activeTaskContext(path, { latestPrompt = "", maxChars = 2000 } = {}) {
+  const turns = readEntries(path)
+    .filter(isUserTurn)
+    .map((entry) => extractUserText(textOf(entry.message?.content ?? entry.content)))
+    .filter(Boolean);
+  const prompt = extractUserText(latestPrompt);
+  if (prompt && prompt !== turns.at(-1)) turns.push(prompt);
+  const latest = turns.at(-1);
+  if (!latest) return "";
+  if (RESET_TASK.test(latest) || !FOLLOWUP.test(latest)) return boundedText(latest, maxChars);
+
+  const prior = turns.slice(0, -1).slice(-8);
+  let resetAt = -1;
+  for (let index = prior.length - 1; index >= 0; index--) {
+    if (RESET_TASK.test(prior[index])) { resetAt = index; break; }
+  }
+  if (resetAt > 0) prior.splice(0, resetAt);
+  if (!prior.length) return boundedText(latest, maxChars);
+  const prefix = "Recent user directions (oldest first; latest overrides):\n";
+  const suffix = `\nLatest user direction:\n${boundedText(latest, Math.floor(maxChars / 2))}`;
+  const priorBudget = maxChars - prefix.length - suffix.length;
+  if (priorBudget < 80) return boundedText(latest, maxChars);
+  while (prior.length > 1 && priorBudget / prior.length < 85) prior.shift();
+  const perTurn = Math.floor(priorBudget / prior.length) - 5;
+  const history = prior.map((turn, index) => `${index + 1}. ${boundedText(turn, perTurn)}`).join("\n");
+  return `${prefix}${history}${suffix}`;
 }
 
 /** Recent tool calls and whether they failed — the context for "is this a repeat?". */

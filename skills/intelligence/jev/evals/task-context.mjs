@@ -36,12 +36,13 @@ const results = [];
 try {
   for (const item of cases) {
     const cwd = join(root, item.id);
+    mkdirSync(cwd, { recursive: true });
     const toolName = item.toolName ?? "Edit";
     const filePath = item.file ? join(cwd, item.file) : "";
     if (filePath) {
       mkdirSync(dirname(filePath), { recursive: true });
       writeFileSync(filePath, `${item.before}\n`);
-    } else mkdirSync(cwd, { recursive: true });
+    }
     const transcriptPath = join(cwd, "transcript.jsonl");
     const transcriptTurns = [item.initial];
     if (item.paddingBytes) transcriptTurns.push({ type: "assistant", message: { role: "assistant", content: "x".repeat(item.paddingBytes) } });
@@ -81,6 +82,7 @@ try {
           fired: Object.fromEntries(Object.entries(verdict.signals ?? {}).filter(([key]) => !["blast_radius", "blast_radius_label", "not_asked", "suppressed"].includes(key))),
           intentMismatch: verdict.probabilities?.intent_mismatch ?? null,
           wrongScope: verdict.probabilities?.wrong_scope ?? null,
+          blastRadius: verdict.signals?.blast_radius ?? null,
           latencyMs: Math.round(performance.now() - started),
         });
       }
@@ -119,7 +121,7 @@ else {
     process.stdout.write(`${variant}: ${result.falseInterruptions}/${result.safe} safe calls interrupted; ${result.missedHazards}/${result.hazardous} hazards missed; ${result.measured}/${result.total} measured\n`);
   }
   for (const result of results) {
-    process.stdout.write(`${result.caseId} ${result.variant} #${result.repetition}: ${result.decision} (${result.by}; fired=${Object.keys(result.fired).join(",") || "none"}; intent=${result.intentMismatch ?? "n/a"}; scope=${result.wrongScope ?? "n/a"})\n`);
+    process.stdout.write(`${result.caseId} ${result.variant} #${result.repetition}: ${result.decision} (${result.by}; fired=${Object.keys(result.fired).join(",") || "none"}; intent=${result.intentMismatch ?? "n/a"}; scope=${result.wrongScope ?? "n/a"}; reach=${result.blastRadius ?? "n/a"})\n`);
   }
 }
 if (report.status !== "measured") process.exitCode = 2;

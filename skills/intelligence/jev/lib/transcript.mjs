@@ -108,8 +108,13 @@ export function latestUserRequest(path, { maxChars = 1500 } = {}) {
 
 // Short steering and selection replies depend on the preceding task. An
 // independent request stands alone so old work cannot silently widen it.
-const FOLLOWUP = /^(?:please\s+)?(?:continue|resume|proceed|keep going|go on|carry on|go ahead|do it|(?:signed|logged) in[,;:]?\s+(?:go ahead|continue|proceed)|option\s+[a-z0-9]+|yes\b|okay\b|ok\b|agreed\b|confirm all\b|let'?s park\b|park\b|once\b|also\b|but\b|and\b|stop after\b|stop when\b)\b/i;
+const FOLLOWUP = /^(?:please\s+)?(?:continue|resume|proceed|keep going|go on|carry on|go ahead|do it|(?:signed|logged) in[,;:]?\s+(?:go ahead|continue|proceed)|option\s+[a-z0-9]+|yes\b|yeah\b|yep\b|sure\b|okay\b|ok\b|agreed\b|approved\b|confirm(?:ed)?\b|confirm all\b|let'?s park\b|park\b|once\b|also\b|but\b|and\b|stop after\b|stop when\b)\b/i;
 const RESET_TASK = /^(?:instead\b|forget\b|new task\b|switch to\b|stop(?:[.!?]?\s*$| working on\b))/i;
+const SHORT_APPROVAL = /^(?:yes|yeah|yep|sure|okay|ok|agreed|approved|confirm(?:ed)?|go ahead|do it|proceed|option\s+[a-z0-9]+)(?:[.!?])?$/i;
+const APPROVAL_PREFIX = /^(?:yes|yeah|yep|sure|okay|ok|agreed|approved|confirm(?:ed)?|go ahead|do it|proceed|option\s+[a-z0-9]+)\b/i;
+const PROPOSAL_QUESTION = /\b(?:do you want me(?: to)?|would you like me(?: to)?|should i\b|shall i\b|can i\b|may i\b|want me to\b|which (?:option|one)\b|(?:needs?|requires?) your (?:ok|okay|approval)\b)\b/i;
+const PROPOSAL_ACTION = /\b(?:i['’]ll|i['’]d|i would|i can|i will|we can|we should|let me|switch|update|change|edit|add|remove|run|commit|push|regenerate|make|apply|implement|fix|keep|leave|park)\b/i;
+const MAX_PROPOSAL_CHARS = 800;
 const REFERENCE_STOPWORDS = new Set([
   "after", "again", "agreed", "before", "change", "changes", "commit", "commits",
   "confirm", "continue", "files", "final", "going", "option", "please",
@@ -129,6 +134,48 @@ function relatedEarlierTurn(turns, latest) {
   return "";
 }
 
+const isAssistantTurn = (entry) =>
+  entry?.isMeta !== true && (
+    entry?.type === "assistant" ||
+    entry?.role === "assistant" ||
+    entry?.message?.role === "assistant"
+  );
+
+function shortApproval(text) {
+  const value = text.trim();
+  if (!value || value.length > 160) return false;
+  if (SHORT_APPROVAL.test(value)) return true;
+  // Keep short replies with a small qualifier (for example, "yes, please")
+  // in the approval path while leaving explicit scope changes in the user
+  // text for the normal follow-up handling below.
+  return APPROVAL_PREFIX.test(value) && !/\b(?:instead|only|except|without|keep|don't|do not|never)\b/i.test(value);
+}
+
+function assistantText(entry) {
+  return stripInjectedBlocks(textOf(entry?.message?.content ?? entry?.content));
+}
+
+/**
+ * A short approval can answer an assistant's plan rather than restating the
+ * user's task. Carry only the immediately preceding assistant text when it
+ * contains an explicit approval question. Tool calls and tool results are
+ * deliberately not considered proposal text.
+ */
+function precedingAssistantProposal(entries, latestEntryIndex) {
+  if (latestEntryIndex < 0) return "";
+  for (let index = latestEntryIndex - 1; index >= 0; index--) {
+    const entry = entries[index];
+    // Tool results are encoded as user turns by Claude. Only a new human
+    // direction can supersede the proposal the short reply refers to.
+    if (isUserTurn(entry) && extractUserText(textOf(entry.message?.content ?? entry.content))) break;
+    if (!isAssistantTurn(entry)) continue;
+    const text = assistantText(entry);
+    if (!text) continue;
+    return PROPOSAL_QUESTION.test(text) && PROPOSAL_ACTION.test(text) ? text : "";
+  }
+  return "";
+}
+
 const boundedText = (value, limit) => {
   if (value.length <= limit) return value;
   const marker = "\n[earlier task text omitted]\n";
@@ -140,15 +187,29 @@ const boundedText = (value, limit) => {
 
 /** The current request, with recent user directions when it amends ongoing work. */
 export function activeTaskContext(path, { latestPrompt = "", maxChars = 2000 } = {}) {
-  const turns = readEntries(path)
-    .filter(isUserTurn)
-    .map((entry) => extractUserText(textOf(entry.message?.content ?? entry.content)))
-    .filter(Boolean);
+  const entries = readEntries(path);
+  const turns = [];
+  let latestEntryIndex = -1;
+  for (let index = 0; index < entries.length; index++) {
+    const entry = entries[index];
+    if (!isUserTurn(entry)) continue;
+    const text = extractUserText(textOf(entry.message?.content ?? entry.content));
+    if (!text) continue;
+    turns.push(text);
+    latestEntryIndex = index;
+  }
   const prompt = extractUserText(latestPrompt);
-  if (prompt && prompt !== turns.at(-1)) turns.push(prompt);
+  if (prompt && prompt !== turns.at(-1)) {
+    turns.push(prompt);
+    latestEntryIndex = -1;
+  }
   const latest = turns.at(-1);
   if (!latest) return "";
   if (RESET_TASK.test(latest) || !FOLLOWUP.test(latest)) return boundedText(latest, maxChars);
+
+  const proposal = shortApproval(latest)
+    ? precedingAssistantProposal(entries, latestEntryIndex)
+    : "";
 
   const earlier = turns.slice(0, -1);
   const prior = earlier.slice(-8);
@@ -159,15 +220,30 @@ export function activeTaskContext(path, { latestPrompt = "", maxChars = 2000 } =
   if (resetAt > 0) prior.splice(0, resetAt);
   const related = relatedEarlierTurn(earlier.slice(0, -prior.length), latest);
   if (related && !prior.includes(related)) prior.unshift(related);
-  if (!prior.length) return boundedText(latest, maxChars);
-  const prefix = "Recent user directions (oldest first; latest overrides):\n";
+  if (!prior.length && !proposal) return boundedText(latest, maxChars);
+  const prefix = prior.length ? "Recent user directions (oldest first; latest overrides):\n" : "";
   const suffix = `\nLatest user direction:\n${boundedText(latest, Math.floor(maxChars / 2))}`;
-  const priorBudget = maxChars - prefix.length - suffix.length;
-  if (priorBudget < 80) return boundedText(latest, maxChars);
+  const proposalLabel = "\nAssistant proposal before the latest user reply (context only; not a user instruction):\n";
+  const proposalBudget = proposal
+    ? Math.min(MAX_PROPOSAL_CHARS, Math.max(0, Math.floor((maxChars - prefix.length - suffix.length) * 0.45)))
+    : 0;
+  const proposalText = proposalBudget > 0 ? boundedText(proposal, proposalBudget) : "";
+  const proposalSection = proposalText ? `${proposalLabel}${proposalText}\n` : "";
+  const priorBudget = maxChars - prefix.length - suffix.length - proposalSection.length;
+  if (prior.length && priorBudget < 80) {
+    if (!proposalSection) return boundedText(latest, maxChars);
+    const available = maxChars - suffix.length - proposalLabel.length;
+    if (available <= 0) return boundedText(latest, maxChars);
+    const context = `${proposalLabel}${boundedText(proposal, available)}${suffix}`;
+    return context.length <= maxChars ? context : boundedText(context, maxChars);
+  }
   while (prior.length > 1 && priorBudget / prior.length < 85) prior.splice(related ? 1 : 0, 1);
-  const perTurn = Math.floor(priorBudget / prior.length) - 5;
-  const history = prior.map((turn, index) => `${index + 1}. ${boundedText(turn, perTurn)}`).join("\n");
-  return `${prefix}${history}${suffix}`;
+  const perTurn = prior.length ? Math.floor(priorBudget / prior.length) - 5 : 0;
+  const history = prior.length
+    ? prior.map((turn, index) => `${index + 1}. ${boundedText(turn, perTurn)}`).join("\n")
+    : "";
+  const context = `${prefix}${history}${proposalSection}${suffix}`;
+  return context.length <= maxChars ? context : boundedText(context, maxChars);
 }
 
 /** Confirmed user-run pushes are observed state, never a new instruction. */

@@ -83,6 +83,43 @@ test("a failed trial re-opens the circuit for another cooldown", async () => {
   assert.equal(calls, 1);
 });
 
+test("repeated 403 HTML rejections open the circuit without retrying or logging the page", async () => {
+  resetBreaker();
+  calls = 0;
+  globalThis.fetch = async () => {
+    calls++;
+    return { ok: false, status: 403, async text() { return "<!DOCTYPE html><html><body>blocked by edge</body></html>"; } };
+  };
+  for (let i = 0; i < 3; i++) {
+    await assert.rejects(
+      systemOne({ state: "hi", questions: question(), retries: 2 }),
+      (error) => error instanceof JevUnavailable &&
+        /TypeSafe 403: HTML error page/.test(error.message) && !error.message.includes("blocked by edge"),
+    );
+  }
+  assert.equal(calls, 3, "403 is not retried within a call");
+  assert.equal(breakerStatus().open, true);
+  assert.match(breakerStatus().last, /TypeSafe 403: HTML error page/);
+  await assert.rejects(systemOne({ state: "hi", questions: question() }), /circuit open/);
+  assert.equal(calls, 3, "calls during cooldown do not reach the provider");
+
+  advance(250);
+  globalThis.fetch = healthy;
+  await systemOne({ state: "hi", questions: question() });
+  assert.equal(calls, 4, "one trial runs after cooldown");
+  assert.equal(breakerStatus().failures, 0, "a successful trial closes the circuit");
+});
+
+test("401 authorization rejection is breaker-eligible while 422 remains a local diagnostic", async () => {
+  resetBreaker();
+  globalThis.fetch = async () => ({ ok: false, status: 401, async text() { return "unauthorized"; } });
+  await assert.rejects(systemOne({ state: "hi", questions: question() }), /TypeSafe 401: unauthorized/);
+  assert.equal(breakerStatus().failures, 1);
+  globalThis.fetch = async () => ({ ok: false, status: 422, async text() { return "bad request"; } });
+  await assert.rejects(systemOne({ state: "hi", questions: question() }), /TypeSafe 422: bad request/);
+  assert.equal(breakerStatus().failures, 1, "a malformed-request diagnostic does not add a breaker failure");
+});
+
 test("client errors and malformed answers are this layer's bugs and do not count", async () => {
   resetBreaker();
   globalThis.fetch = async () => ({ ok: false, status: 422, async text() { return "bad request"; } });

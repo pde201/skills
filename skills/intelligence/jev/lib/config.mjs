@@ -46,7 +46,7 @@ export const config = {
   model: process.env.JEV_MODEL || "jev-latest",
 
   // After this many consecutive provider failures (5xx, 429, timeout,
-  // network — never a 4xx or a malformed answer, which are our bugs) remote
+  // network, or repeated 401/403 authorization/edge rejection) remote
   // judgments are skipped for the cooldown and fail open at once. 0 disables.
   breakerFailures: num("JEV_BREAKER_FAILURES", 3),
   breakerCooldownMs: num("JEV_BREAKER_COOLDOWN_MS", 60_000),

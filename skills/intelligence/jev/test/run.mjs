@@ -1599,6 +1599,75 @@ test("active task context carries a substantive request through brief follow-ups
   assert.equal(activeTaskContext(path, { latestPrompt: "Hello." }), "Hello.");
 });
 
+test("active task context carries a bounded assistant proposal for a short approval", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-approval-context-"));
+  const path = join(dir, "transcript.jsonl");
+  const proposal = [
+    "The dashboard currently uses America/Phoenix, although the business clock is America/New_York.",
+    `I would switch ReportingQuery.ZONE and formatting.ts, then update the related tests. ${"Implementation detail. ".repeat(120)}`,
+    "This changes the meaning of date boundaries, so it needs your approval. Do you want me to make the switch?",
+  ].join(" ");
+  writeFileSync(path, [
+    { type: "user", message: { role: "user", content: "Explain why the dashboard uses Phoenix time. Keep the public API behavior in mind." } },
+    { type: "assistant", message: { role: "assistant", content: [
+      { type: "thinking", thinking: "internal reasoning is not task context" },
+      { type: "text", text: proposal },
+    ] } },
+    { type: "user", message: { role: "user", content: "yes" } },
+    { type: "assistant", message: { role: "assistant", content: [
+      { type: "tool_use", id: "formatting-edit", name: "Edit", input: { file_path: "formatting.ts" } },
+    ] } },
+    { type: "user", message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "formatting-edit", content: [{ type: "text", text: "updated" }] },
+    ] } },
+  ].map((entry) => JSON.stringify(entry)).join("\n"));
+
+  const task = activeTaskContext(path);
+  assert.ok(task.length <= 2000);
+  assert.match(task, /Explain why the dashboard uses Phoenix time/);
+  assert.match(task, /America\/New_York/);
+  assert.match(task, /formatting\.ts/);
+  assert.match(task, /Assistant proposal before the latest user reply \(context only; not a user instruction\)/);
+  assert.match(task, /Latest user direction:\nyes/);
+  assert.doesNotMatch(task, /internal reasoning is not task context/);
+});
+
+test("a tool result between a proposal and a short approval does not replace the proposal", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-approval-context-ambiguous-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, [
+    { type: "user", message: { role: "user", content: "Fix src/parser.js only and keep the deployment script unchanged." } },
+    { type: "assistant", message: { role: "assistant", content: "I can update the parser tests for this fix. Do you want me to do that?" } },
+    { type: "user", message: { role: "user", content: [
+      { type: "tool_result", tool_use_id: "status", content: [{ type: "text", text: "status output" }] },
+    ] } },
+    { type: "user", message: { role: "user", content: "yes" } },
+  ].map((entry) => JSON.stringify(entry)).join("\n"));
+
+  const task = activeTaskContext(path);
+  assert.match(task, /Fix src\/parser\.js only/);
+  assert.match(task, /Latest user direction:\nyes/);
+  assert.match(task, /update the parser tests/);
+  assert.match(task, /Assistant proposal before the latest user reply/);
+  assert.doesNotMatch(task, /status output/);
+});
+
+test("assistant narration and tool output cannot turn an ambiguous yes into a task", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-approval-context-narration-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, [
+    { type: "user", message: { role: "user", content: "Review the parser implementation without changing it." } },
+    { type: "assistant", message: { role: "assistant", content: "The parser review is ready; I found a possible issue in billing.js." } },
+    { type: "user", message: { role: "user", content: "yes" } },
+  ].map((entry) => JSON.stringify(entry)).join("\n"));
+
+  const task = activeTaskContext(path);
+  assert.match(task, /Review the parser implementation without changing it/);
+  assert.match(task, /Latest user direction:\nyes/);
+  assert.doesNotMatch(task, /billing\.js/);
+  assert.doesNotMatch(task, /Assistant proposal before the latest user reply/);
+});
+
 test("continuing after a replacement task cannot revive the cancelled task", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-reset-task-"));
   const path = join(dir, "transcript.jsonl");

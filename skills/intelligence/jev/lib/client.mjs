@@ -47,8 +47,8 @@ export function haveKey() {
 // consecutive provider failures the layer stops asking for a cooldown and
 // fails open at once, then lets one trial request through when the
 // cooldown has passed. State is a tiny file, because every hook is its
-// own process. Only provider-side failures count: a 4xx or a malformed
-// answer is this layer's bug and comes back fast anyway.
+// own process. Provider failures and repeated authorization/edge
+// rejections count; malformed requests and answers are this layer's bugs.
 
 const breakerPath = () => join(stateDir(), "breaker.json");
 const breakerEnabled = () => Number.isFinite(config.breakerFailures) && config.breakerFailures > 0;
@@ -185,15 +185,25 @@ export async function systemOne({
         return validated;
       }
 
-      // Redact the complete error body before truncating it; slicing first can
-      // leave a PEM or credential value without the delimiter that protects it.
-      const detail = redactText(await res.text().catch(() => "")).slice(0, 400);
-      // 4xx other than 429 is our bug — a bad question or oversized state.
-      // Retrying cannot help, so surface it immediately.
-      if (res.status !== 429 && res.status < 500) {
-        throw new JevUnavailable(`TypeSafe ${res.status}: ${detail}`);
+      // Discard HTML error pages. For other responses, redact before truncating:
+      // slicing first can expose a credential without its protecting delimiter.
+      const responseText = await res.text().catch(() => "");
+      const detail = /^\s*(?:<!doctype html|<html\b)/i.test(responseText)
+        ? "HTML error page"
+        : redactText(responseText).slice(0, 400);
+      const error = `TypeSafe ${res.status}: ${detail}`;
+      // An authorization rejection or edge/WAF 403 is not fixed by retrying
+      // this call. Repeated rejections should still pause remote judgments.
+      if (res.status === 401 || res.status === 403) {
+        recordProviderFailure(error);
+        throw new JevUnavailable(error);
       }
-      lastError = new JevUnavailable(`TypeSafe ${res.status}: ${detail}`);
+      // Other non-429 4xx responses indicate a malformed request or state;
+      // surface the bug immediately without treating it as a provider outage.
+      if (res.status !== 429 && res.status < 500) {
+        throw new JevUnavailable(error);
+      }
+      lastError = new JevUnavailable(error);
     } catch (err) {
       if (err instanceof JevUnavailable && !/^TypeSafe 5|429/.test(err.message)) throw err;
       lastError = err;

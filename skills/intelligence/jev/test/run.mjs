@@ -1555,6 +1555,8 @@ test("active task context carries a substantive request through brief follow-ups
   assert.equal(activeTaskContext(path, { latestPrompt: "Instead, review the README only." }), "Instead, review the README only.");
   assert.equal(activeTaskContext(path, { latestPrompt: "Stop." }), "Stop.");
   assert.match(activeTaskContext(path, { latestPrompt: "Stop after the regression tests pass." }), /Update the parser and its tests/);
+  assert.match(activeTaskContext(path, { latestPrompt: "Signed in, go ahead." }), /Update the parser and its tests/);
+  assert.match(activeTaskContext(path, { latestPrompt: "Logged in; continue." }), /Update the parser and its tests/);
   assert.equal(activeTaskContext(path, { latestPrompt: "Hello." }), "Hello.");
 });
 

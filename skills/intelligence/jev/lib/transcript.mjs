@@ -107,7 +107,7 @@ export function latestUserRequest(path, { maxChars = 1500 } = {}) {
 
 // Short steering and selection replies depend on the preceding task. An
 // independent request stands alone so old work cannot silently widen it.
-const FOLLOWUP = /^(?:please\s+)?(?:continue|resume|proceed|keep going|go on|carry on|go ahead|do it|option\s+[a-z0-9]+|yes\b|okay\b|ok\b|agreed\b|confirm all\b|let'?s park\b|park\b|once\b|also\b|but\b|and\b|stop after\b|stop when\b)\b/i;
+const FOLLOWUP = /^(?:please\s+)?(?:continue|resume|proceed|keep going|go on|carry on|go ahead|do it|(?:signed|logged) in[,;:]?\s+(?:go ahead|continue|proceed)|option\s+[a-z0-9]+|yes\b|okay\b|ok\b|agreed\b|confirm all\b|let'?s park\b|park\b|once\b|also\b|but\b|and\b|stop after\b|stop when\b)\b/i;
 const RESET_TASK = /^(?:instead\b|forget\b|new task\b|switch to\b|stop(?:[.!?]?\s*$| working on\b))/i;
 const REFERENCE_STOPWORDS = new Set([
   "after", "again", "agreed", "before", "change", "changes", "commit", "commits",

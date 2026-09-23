@@ -1485,7 +1485,22 @@ test("a Read is judged by code alone: ordinary files pass with no model call, cr
   assert.equal(record.reason, "no api key", "with the switch on and no key, the model path was attempted");
 });
 
-const { activeTaskContext, latestUserRequest, recentUserActions, stripInjectedBlocks, callSignature } = await import("../lib/transcript.mjs");
+const { activeTaskContext, latestUserRequest, recentUserActions, stripInjectedBlocks, callSignature, observedPaths } = await import("../lib/transcript.mjs");
+
+test("observed paths retain successful temp artifacts beyond the call summary", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-temp-artifact-"));
+  const path = join(dir, "transcript.jsonl");
+  const entries = [
+    { type: "assistant", message: { content: [{ type: "tool_use", id: "created", name: "ctx_execute", input: { code: `${"x".repeat(350)}\nopen('/tmp/agent-task-token', 'w').write('redacted')` } }] } },
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "created", content: "ok", is_error: false }] } },
+    { type: "assistant", message: { content: [{ type: "tool_use", id: "failed", name: "ctx_execute", input: { code: "open('/tmp/failed-task-token', 'w')" } }] } },
+    { type: "user", message: { content: [{ type: "tool_result", tool_use_id: "failed", content: "error", is_error: true }] } },
+  ];
+  writeFileSync(path, entries.map((entry) => JSON.stringify(entry)).join("\n"));
+  const seen = observedPaths(path);
+  assert.ok(seen.includes("/tmp/agent-task-token"));
+  assert.ok(!seen.includes("/tmp/failed-task-token"));
+});
 
 test("latestUserRequest drops host-injected blocks and keeps what the user typed", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-injected-"));

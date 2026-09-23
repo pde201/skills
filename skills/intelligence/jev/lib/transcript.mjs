@@ -203,7 +203,7 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
     if (Array.isArray(content)) {
       for (const part of content) {
         if (part?.type === "tool_use") {
-          calls.push({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), signature: callSignature(part.name, part.input), failed: false, id: part.id });
+          calls.push({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), paths: temporaryPaths(part.input), signature: callSignature(part.name, part.input), failed: false, id: part.id });
         } else if (part?.type === "tool_result") {
           const call = calls.find((c) => c.id === part.tool_use_id);
           if (call) {
@@ -220,7 +220,7 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
         const id = call.id ?? String(entry.step_index ?? Math.random());
         const failed = Boolean(entry?.status === "ERROR" || call?.status === "ERROR" || call?.is_error || entry?.is_error);
         const args = call.args ?? call.input;
-        calls.push({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), signature: callSignature(call.name, args), failed, id });
+        calls.push({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), paths: temporaryPaths(args), signature: callSignature(call.name, args), failed, id });
       }
     } else if (entry?.source === "MODEL" && entry?.type === "GENERIC" && calls.length > 0) {
       const lastCall = calls[calls.length - 1];
@@ -261,6 +261,12 @@ function summarizeInput(input) {
   return JSON.stringify(input).slice(0, 300);
 }
 
+/** Temporary paths can occur after the 300-character call summary. */
+function temporaryPaths(input) {
+  const raw = JSON.stringify(input ?? "");
+  return [...new Set(raw.match(/(?:\/private)?\/tmp\/[\w./@+-]+/g) ?? [])].slice(0, 20);
+}
+
 /** Local fingerprint for an unchanged retry without retaining full input. */
 export function callSignature(tool, input) {
   const value = tool === "Bash" ? input?.command : input;
@@ -294,6 +300,7 @@ export function observedPaths(path) {
   const seen = new Set();
   for (const call of recentToolCalls(path, { limit: 400 })) {
     if (call.failed) continue;
+    for (const tempPath of call.paths ?? []) seen.add(tempPath);
     const match = call.input.match(/(?:^|\s)((?:~|\.{0,2}\/)[\w.\-/@]+)/g);
     for (const m of match ?? []) seen.add(m.trim());
     if (/^\/|^\.\//.test(call.input)) seen.add(call.input);

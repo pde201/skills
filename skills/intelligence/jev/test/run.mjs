@@ -1485,6 +1485,20 @@ test("latestUserRequest drops host-injected blocks and keeps what the user typed
   assert.equal(stripInjectedBlocks("<request>keep me</request>"), "<request>keep me</request>", "unknown tags are the user's own");
 });
 
+test("task context skips Claude skill text and compaction summaries recorded as user turns", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-claude-meta-"));
+  const path = join(dir, "transcript.jsonl");
+  const request = "Fix the failing integration test, run mvn test, commit the fix, and push directly to main.";
+  writeFileSync(path, [
+    { type: "user", origin: { kind: "human" }, message: { role: "user", content: request } },
+    { type: "user", message: { role: "user", content: "This session is being continued from a previous conversation that ran out of context. The summary below covers earlier work." } },
+    { type: "user", isMeta: true, message: { role: "user", content: [{ type: "text", text: "Base directory for this skill: /skills/engineering. Follow its instructions." }] } },
+    { type: "user", message: { role: "user", content: [{ type: "tool_result", content: "A command completed" }] } },
+  ].map((entry) => JSON.stringify(entry)).join("\n"));
+  assert.equal(latestUserRequest(path), request);
+  assert.equal(activeTaskContext(path), request);
+});
+
 test("active task context carries a substantive request through brief follow-ups", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-active-task-"));
   const path = join(dir, "transcript.jsonl");

@@ -44,7 +44,7 @@ try {
     } else mkdirSync(cwd, { recursive: true });
     const transcriptPath = join(cwd, "transcript.jsonl");
     writeFileSync(transcriptPath, [item.initial, ...(item.intermediate ?? []), item.followup]
-      .map((content) => JSON.stringify({ type: "user", message: { role: "user", content } }))
+      .map((turn) => JSON.stringify(typeof turn === "string" ? { type: "user", message: { role: "user", content: turn } } : turn))
       .join("\n"));
     const tasks = {
       baseline: latestUserRequest(transcriptPath),

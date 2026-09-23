@@ -71,17 +71,21 @@ const extractUserText = (raw) => {
   if (match) return match[1].trim();
   const text = stripInjectedBlocks(raw);
   if (/^\[Request interrupted by user(?: for tool use)?\]$/.test(text)) return "";
+  if (/^This session is being continued from a previous conversation that ran out of context\./.test(text)) return "";
+  if (/^The app was quit while you were working\. Please continue from where you left off\./.test(text)) return "";
   // Claude/Codex tool results arrive shaped as user turns; skip them
   if (text.startsWith("<") && !text.startsWith("<USER_REQUEST>")) return "";
   return text;
 };
 
 const isUserTurn = (entry) =>
-  entry?.type === "user" ||
-  entry?.role === "user" ||
-  entry?.message?.role === "user" ||
-  entry?.type === "USER_INPUT" ||
-  entry?.source === "USER_EXPLICIT";
+  entry?.isMeta !== true && (
+    entry?.type === "user" ||
+    entry?.role === "user" ||
+    entry?.message?.role === "user" ||
+    entry?.type === "USER_INPUT" ||
+    entry?.source === "USER_EXPLICIT"
+  );
 
 /** The most recent thing the human actually asked for. */
 export function latestUserRequest(path, { maxChars = 1500 } = {}) {

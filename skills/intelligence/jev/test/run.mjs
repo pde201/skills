@@ -1226,6 +1226,19 @@ test("repeat failure is asked only when a recent tool call actually failed", () 
     ...successful,
     { tool: "Bash", input: call.input.command, failed: true },
   ]));
+  assert.ok(!("repeat_failure" in guardQuestions(call, [], [
+    { tool: "Bash", input: "git status --short && false", failed: true },
+  ])), "a corrected shell command is not an unchanged retry");
+  assert.ok(!("repeat_failure" in guardQuestions(call, [], [
+    { tool: "Bash", input: call.input.command, failed: true },
+    { tool: "Bash", input: call.input.command, failed: false },
+  ])), "a later success resolves the earlier failure");
+
+  const longCommand = `printf '%s' '${"x".repeat(350)}' && false`;
+  const longCall = { toolName: "Bash", input: { command: longCommand } };
+  assert.ok("repeat_failure" in guardQuestions(longCall, [], [
+    { tool: "Bash", input: longCommand.slice(0, 300), signature: callSignature("Bash", longCall.input), failed: true },
+  ]), "a long exact retry is still checked despite the shortened display input");
 });
 
 // ── what counts as the workspace ─────────────────────────────────────
@@ -1472,7 +1485,7 @@ test("a Read is judged by code alone: ordinary files pass with no model call, cr
   assert.equal(record.reason, "no api key", "with the switch on and no key, the model path was attempted");
 });
 
-const { activeTaskContext, latestUserRequest, recentUserActions, stripInjectedBlocks } = await import("../lib/transcript.mjs");
+const { activeTaskContext, latestUserRequest, recentUserActions, stripInjectedBlocks, callSignature } = await import("../lib/transcript.mjs");
 
 test("latestUserRequest drops host-injected blocks and keeps what the user typed", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-injected-"));

@@ -7,6 +7,7 @@
 // ──────────────────────────────────────────────────────────────────────
 
 import { readFileSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { dirname } from "node:path";
 
 const MAX_BYTES = 4_000_000;
@@ -202,7 +203,7 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
     if (Array.isArray(content)) {
       for (const part of content) {
         if (part?.type === "tool_use") {
-          calls.push({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), failed: false, id: part.id });
+          calls.push({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), signature: callSignature(part.name, part.input), failed: false, id: part.id });
         } else if (part?.type === "tool_result") {
           const call = calls.find((c) => c.id === part.tool_use_id);
           if (call) {
@@ -219,7 +220,7 @@ export function recentToolCalls(path, { limit = 12 } = {}) {
         const id = call.id ?? String(entry.step_index ?? Math.random());
         const failed = Boolean(entry?.status === "ERROR" || call?.status === "ERROR" || call?.is_error || entry?.is_error);
         const args = call.args ?? call.input;
-        calls.push({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), failed, id });
+        calls.push({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), signature: callSignature(call.name, args), failed, id });
       }
     } else if (entry?.source === "MODEL" && entry?.type === "GENERIC" && calls.length > 0) {
       const lastCall = calls[calls.length - 1];
@@ -258,6 +259,13 @@ function summarizeInput(input) {
   if (typeof input.pattern === "string") return input.pattern;
   if (typeof input.Pattern === "string") return input.Pattern;
   return JSON.stringify(input).slice(0, 300);
+}
+
+/** Local fingerprint for an unchanged retry without retaining full input. */
+export function callSignature(tool, input) {
+  const value = tool === "Bash" ? input?.command : input;
+  if (value === undefined) return "";
+  return createHash("sha256").update(JSON.stringify([tool, value])).digest("hex");
 }
 
 const FILE_WRITE_TOOLS = new Set([

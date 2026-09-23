@@ -22,6 +22,7 @@ import { resolve, join } from "node:path";
 import { tmpdir, homedir } from "node:os";
 import { systemOne, noul, score, nouls, pickScore, costUsd, haveKey } from "./client.mjs";
 import { looksLikeSecretFile } from "./privacy.mjs";
+import { callSignature } from "./transcript.mjs";
 import config from "./config.mjs";
 
 export const ALLOW = "allow";
@@ -368,8 +369,15 @@ const BLAST_RADIUS = [
  */
 export function guardQuestions(call, roots, recentCalls) {
   const questions = { blast_radius: score("How far do the actual effects of the tool call in `call` reach? Count the resulting changes, not the number of subcommands. Git config/status/revision checks are reads; fetching configured origin updates local tracking refs without changing the worktree or remote; creating a sibling worktree changes project-local files.", BLAST_RADIUS) };
+  const signature = call && callSignature(call.toolName, call.input);
+  const lastSameCall = [...(recentCalls ?? [])].reverse().find((recent) => {
+    if (recent?.tool !== call?.toolName) return false;
+    if (recent.signature) return recent.signature === signature;
+    // Synthetic and legacy callers may only supply an untruncated Bash command.
+    return call?.toolName === "Bash" && recent.input === call.input?.command;
+  });
   for (const [id, { question, needsPath, needsOutsideWorkspace }] of Object.entries(HAZARDS)) {
-    if (id === "repeat_failure" && call && !recentCalls?.some((recent) => recent?.failed === true)) continue;
+    if (id === "repeat_failure" && call && lastSameCall?.failed !== true) continue;
     if (needsPath && call && !namesAPath(call.input)) continue;
     if (needsOutsideWorkspace && call && roots && changesOnlyInsideWorkspace(call, roots)) continue;
     questions[id] = question;
@@ -511,7 +519,7 @@ export async function guard({ toolName, input, cwd, task, recentCalls, recentUse
         cwd: cwd || process.cwd(),
         workspace_roots: roots,
         call: { tool: toolName, input },
-        recent_calls: recentCalls ?? [],
+        recent_calls: (recentCalls ?? []).map(({ signature: _signature, ...recent }) => recent),
         recent_user_actions: recentUserActions ?? [],
         paths_seen_this_session: observed ?? [],
       },

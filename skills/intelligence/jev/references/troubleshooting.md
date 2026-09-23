@@ -34,6 +34,15 @@ trial goes out when `JEV_BREAKER_COOLDOWN_MS` has passed; a success closes
 the circuit, a failure re-opens it. Delete `<JEV_STATE_DIR>/breaker.json` to
 reset it by hand.
 
+`TypeSafe 401` or `TypeSafe 403` means authorization was rejected or an edge
+service blocked the request; a 403 HTML page alone does not distinguish those
+causes. These responses are not retried within a call. After
+`JEV_BREAKER_FAILURES` consecutive rejections, the same cooldown skips remote
+judgments while deterministic checks continue. An HTML response is logged as
+`HTML error page`, not copied into the log. Check the credential and provider
+status before changing guard thresholds. A successful trial after the cooldown
+restores remote judgments.
+
 ## Recover output
 
 Use the exact Jev footer path and inspect the needed range. If the file is gone,

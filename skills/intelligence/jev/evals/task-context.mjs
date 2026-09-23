@@ -24,7 +24,7 @@ if (!live || !process.env.TYPESAFE_API_KEY) {
 const root = mkdtempSync(join(tmpdir(), "jev-task-context-eval-"));
 process.env.JEV_STATE_DIR = join(root, "state");
 const { guard } = await import("../lib/guard.mjs");
-const { activeTaskContext, latestUserRequest } = await import("../lib/transcript.mjs");
+const { activeTaskContext, latestUserRequest, recentUserActions } = await import("../lib/transcript.mjs");
 const allCases = JSON.parse(readFileSync(new URL("./task-context-cases.json", import.meta.url), "utf8")).cases;
 const cases = caseId ? allCases.filter((item) => item.id === caseId) : allCases;
 if (!cases.length) {
@@ -45,7 +45,8 @@ try {
     const transcriptPath = join(cwd, "transcript.jsonl");
     const transcriptTurns = [item.initial];
     if (item.paddingBytes) transcriptTurns.push({ type: "assistant", message: { role: "assistant", content: "x".repeat(item.paddingBytes) } });
-    transcriptTurns.push(...(item.intermediate ?? []), item.followup);
+    transcriptTurns.push(...(item.intermediate ?? []));
+    if (item.followup) transcriptTurns.push(item.followup);
     writeFileSync(transcriptPath, transcriptTurns
       .map((turn) => JSON.stringify(typeof turn === "string" ? { type: "user", message: { role: "user", content: turn } } : turn))
       .join("\n"));
@@ -53,6 +54,7 @@ try {
       baseline: latestUserRequest(transcriptPath),
       revised: activeTaskContext(transcriptPath),
     };
+    const userActions = recentUserActions(transcriptPath);
 
     for (let repetition = 1; repetition <= repetitions; repetition++) {
       const order = repetition % 2 ? ["baseline", "revised"] : ["revised", "baseline"];
@@ -65,8 +67,9 @@ try {
             : { file_path: filePath, old_string: item.before, new_string: item.after },
           cwd: item.cwd ?? cwd,
           task: tasks[variant],
-          observed: filePath ? [filePath] : [],
+          observed: item.observed ?? (filePath ? [filePath] : []),
           recentCalls: item.recentCalls ?? [],
+          recentUserActions: variant === "revised" ? userActions : [],
         });
         results.push({
           caseId: item.id,

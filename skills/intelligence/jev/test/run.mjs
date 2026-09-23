@@ -1461,7 +1461,7 @@ test("a Read is judged by code alone: ordinary files pass with no model call, cr
   assert.equal(record.reason, "no api key", "with the switch on and no key, the model path was attempted");
 });
 
-const { activeTaskContext, latestUserRequest, stripInjectedBlocks } = await import("../lib/transcript.mjs");
+const { activeTaskContext, latestUserRequest, recentUserActions, stripInjectedBlocks } = await import("../lib/transcript.mjs");
 
 test("latestUserRequest drops host-injected blocks and keeps what the user typed", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-injected-"));
@@ -1511,6 +1511,18 @@ test("a named follow-up recovers its original task beyond the transcript tail", 
   const task = activeTaskContext(path);
   assert.match(task, /Review the Evidence River counts and remove obsolete monitor definitions/);
   assert.match(task, /Latest user direction:\nYes, commit the River work as three commits/);
+});
+
+test("a successful user-run push is evidence without becoming a user request", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-user-action-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, [
+    { type: "user", origin: { kind: "human" }, message: { role: "user", content: "Commit the River work." } },
+    { type: "user", origin: { kind: "human" }, message: { role: "user", content: "<bash-input>git -C /workspace/voi push origin main</bash-input><bash-stdout>To https://example.com/repo.git\n  abc123..def456  main -&gt; main</bash-stdout>" } },
+    { type: "user", origin: { kind: "human" }, message: { role: "user", content: "<bash-input>git push origin prod</bash-input><bash-stdout>! [rejected] prod -> prod</bash-stdout>" } },
+  ].map((entry) => JSON.stringify(entry)).join("\n"));
+  assert.equal(latestUserRequest(path), "Commit the River work.");
+  assert.deepEqual(recentUserActions(path), ["User-run git push to origin/main succeeded"]);
 });
 
 test("active task context carries a substantive request through brief follow-ups", () => {

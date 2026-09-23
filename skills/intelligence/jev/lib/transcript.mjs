@@ -169,6 +169,24 @@ export function activeTaskContext(path, { latestPrompt = "", maxChars = 2000 } =
   return `${prefix}${history}${suffix}`;
 }
 
+/** Confirmed user-run pushes are observed state, never a new instruction. */
+export function recentUserActions(path) {
+  const actions = [];
+  for (const entry of readEntries(path)) {
+    if (entry?.origin?.kind !== "human" || entry?.isMeta === true) continue;
+    const raw = textOf(entry.message?.content ?? entry.content);
+    const command = raw.match(/<bash-input>([\s\S]*?)<\/bash-input>/)?.[1]?.trim();
+    const output = raw.match(/<bash-stdout>([\s\S]*?)<\/bash-stdout>/)?.[1] ?? "";
+    const push = command?.match(/^git(?:\s+-C\s+(?:"[^"]+"|'[^']+'|\S+))?\s+push\s+origin\s+([\w./-]+)$/);
+    if (!push || /!\s*\[rejected\]|\bfatal:|\berror:/i.test(output)) continue;
+    const branch = push[1];
+    const updated = [...output.replaceAll("-&gt;", "->").matchAll(/->\s+(\S+)/g)]
+      .some((match) => match[1] === branch);
+    if (updated || /Everything up-to-date/.test(output)) actions.push(`User-run git push to origin/${branch} succeeded`);
+  }
+  return [...new Set(actions)].slice(-3);
+}
+
 /** Recent tool calls and whether they failed — the context for "is this a repeat?". */
 export function recentToolCalls(path, { limit = 12 } = {}) {
   const entries = readEntries(path);

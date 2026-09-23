@@ -4,7 +4,7 @@
 `TYPESAFE_BASE_URL` overrides the endpoint). Guard state includes task, working
 directory, workspace roots (the cwd, host workspace folders, directories the
 session has written to, the temp directory, `JEV_WORKSPACE_ROOTS`), tool input,
-recent calls, and observed paths. Slimming includes task, command, and output
+recent calls, confirmed user-run push outcomes, and observed paths. Slimming includes task, command, and output
 blocks. Compaction includes candidate history and current
 task. These can contain source code, personal data, and business information.
 
@@ -38,7 +38,9 @@ rewritten command); files older than seven days are swept whenever a new one
 is written, and Codex removes its own at SessionEnd. `breaker.json` holds
 only failure counts, a timestamp and a redacted error message. Text that hosts inject into user turns (system reminders,
 hook notifications, terminal relays) is stripped before harvesting and is not
-carried into briefs or task strings. Logs and saved output have no automatic
+carried into briefs or task strings. A successful user-run `git push` is reduced
+to its remote, branch, and success state for guard judgment; the raw terminal
+relay is not sent. Logs and saved output have no automatic
 retention guarantee; review and delete specific artifacts when no longer
 needed. Removing hooks does not remove these artifacts. Never delete an entire
 user-selected state directory without checking its contents and authorized

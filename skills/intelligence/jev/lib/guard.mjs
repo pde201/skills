@@ -53,6 +53,40 @@ const CATASTROPHIC = [
   { re: /\bcurl\b[^|]*\|\s*(sudo\s+)?(ba)?sh\b/, why: "pipes a downloaded script straight into a shell" },
 ];
 
+// A semicolon before discarding a worktree file breaks the safety chain:
+// earlier verification may fail while checkout/restore and removal still run.
+function hasUnguardedWorktreeCleanup(command) {
+  let quote = null;
+  let escaped = false;
+  for (let i = 0; i < command.length; i++) {
+    const char = command[i];
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\" && quote !== "'") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = null;
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      continue;
+    }
+    if (char !== ";") continue;
+
+    const cleanup = command.slice(i + 1);
+    const discard = /^\s*git(?:\s+-C\s+\S+)?\s+(?:checkout|restore)\b[^;&\n]*?\s--\s+\S+/.exec(cleanup);
+    if (discard && /&&\s*git(?:\s+-C\s+\S+)?\s+worktree\s+remove\b/.test(cleanup.slice(discard[0].length))) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Checks that need no judgment at all. Returns a decision, or null to hand
  * the call on to Jev.
@@ -109,6 +143,13 @@ export function deterministicCheck(toolName, input, cwd) {
       if (re.test(input.command)) {
         return { decision: ASK, reason: `This ${why}. Confirm before it runs.`, by: "code" };
       }
+    }
+    if (hasUnguardedWorktreeCleanup(input.command)) {
+      return {
+        decision: ASK,
+        reason: "A `;` before `git checkout/restore --` lets cleanup run even if earlier checks fail. The checkout can discard changes before the worktree is removed. Confirm this cleanup or connect verification and cleanup with `&&`.",
+        by: "code",
+      };
     }
   }
 

@@ -225,6 +225,25 @@ test("ordinary commands are not caught by the catastrophic patterns", () => {
   }
 });
 
+test("worktree cleanup asks when a semicolon bypasses verification, but not when checks gate it", () => {
+  const checks = "git -C ../voi-fixcheck diff --quiet HEAD -- . '!test/Fix.java' && git -C ../voi-fixcheck diff -- test/Fix.java | git diff --no-index --quiet - <(git show abc123 -- test/Fix.java | sed -n '/^diff --git/,$p')";
+  const cleanup = "git -C ../voi-fixcheck checkout -q -- test/Fix.java && git worktree remove ../voi-fixcheck";
+  const risky = `${checks} ; ${cleanup}`;
+  const guarded = `${checks} && ${cleanup}`;
+  const verdict = deterministicCheck("Bash", { command: risky }, "/workspace/voi");
+  assert.equal(verdict?.decision, ASK);
+  assert.equal(verdict.by, "code");
+  assert.match(verdict.reason, /earlier checks fail/);
+  assert.equal(deterministicCheck("Bash", { command: guarded }, "/workspace/voi"), null);
+  assert.equal(deterministicCheck("Bash", { command: "git -C ../voi-fixcheck diff --quiet HEAD && git worktree remove ../voi-fixcheck" }, "/workspace/voi"), null);
+  assert.equal(deterministicCheck("Bash", { command: `echo '; ${cleanup}' && git worktree list` }, "/workspace/voi"), null);
+
+  const host = runHook({ hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: { command: risky }, cwd: "/workspace/voi" });
+  assert.equal(host.hookSpecificOutput.permissionDecision, "ask");
+  assert.match(host.hookSpecificOutput.permissionDecisionReason, /^Jev approval request \(local check\):/);
+  assert.match(host.hookSpecificOutput.permissionDecisionReason, /checkout can discard changes/);
+});
+
 // ── wrapping ─────────────────────────────────────────────────────────
 
 test("known bloat sources are wrapped", () => {

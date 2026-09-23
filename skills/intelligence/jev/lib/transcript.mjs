@@ -10,6 +10,7 @@ import { readFileSync, statSync } from "node:fs";
 import { dirname } from "node:path";
 
 const MAX_BYTES = 4_000_000;
+const ANCHOR_BYTES = 500_000;
 
 function readEntries(path) {
   if (!path) return [];
@@ -17,8 +18,12 @@ function readEntries(path) {
   try {
     const size = statSync(path).size;
     raw = readFileSync(path, "utf8");
-    // Transcripts grow without bound; only the tail is ever relevant.
-    if (size > MAX_BYTES) raw = raw.slice(-MAX_BYTES);
+    // Keep the first request as well as recent activity: a short follow-up
+    // can refer back to work that has fallen outside the transcript tail.
+    if (size > MAX_BYTES) {
+      const headSize = Math.min(ANCHOR_BYTES, size - MAX_BYTES);
+      raw = `${raw.slice(0, headSize)}\n${raw.slice(-MAX_BYTES)}`;
+    }
   } catch {
     return [];
   }
@@ -104,6 +109,24 @@ export function latestUserRequest(path, { maxChars = 1500 } = {}) {
 // independent request stands alone so old work cannot silently widen it.
 const FOLLOWUP = /^(?:please\s+)?(?:continue|resume|proceed|keep going|go on|carry on|go ahead|do it|option\s+[a-z0-9]+|yes\b|okay\b|ok\b|agreed\b|confirm all\b|let'?s park\b|park\b|once\b|also\b|but\b|and\b|stop after\b|stop when\b)\b/i;
 const RESET_TASK = /^(?:instead\b|forget\b|new task\b|switch to\b|stop(?:[.!?]?\s*$| working on\b))/i;
+const REFERENCE_STOPWORDS = new Set([
+  "after", "again", "agreed", "before", "change", "changes", "commit", "commits",
+  "confirm", "continue", "files", "final", "going", "option", "please",
+  "proceed", "related", "resume", "review", "should", "start", "tests",
+  "their", "there", "these", "those", "three", "through", "update", "with",
+  "work", "would",
+]);
+
+function relatedEarlierTurn(turns, latest) {
+  const words = [...new Set((latest.toLowerCase().match(/[a-z][a-z0-9-]{4,}/g) ?? [])
+    .filter((word) => !REFERENCE_STOPWORDS.has(word)))];
+  if (!words.length) return "";
+  for (let i = turns.length - 1; i >= 0; i--) {
+    const candidate = turns[i];
+    if (words.some((word) => new RegExp(`\\b${word}\\b`, "i").test(candidate))) return candidate;
+  }
+  return "";
+}
 
 const boundedText = (value, limit) => {
   if (value.length <= limit) return value;
@@ -126,18 +149,21 @@ export function activeTaskContext(path, { latestPrompt = "", maxChars = 2000 } =
   if (!latest) return "";
   if (RESET_TASK.test(latest) || !FOLLOWUP.test(latest)) return boundedText(latest, maxChars);
 
-  const prior = turns.slice(0, -1).slice(-8);
+  const earlier = turns.slice(0, -1);
+  const prior = earlier.slice(-8);
   let resetAt = -1;
   for (let index = prior.length - 1; index >= 0; index--) {
     if (RESET_TASK.test(prior[index])) { resetAt = index; break; }
   }
   if (resetAt > 0) prior.splice(0, resetAt);
+  const related = relatedEarlierTurn(earlier.slice(0, -prior.length), latest);
+  if (related && !prior.includes(related)) prior.unshift(related);
   if (!prior.length) return boundedText(latest, maxChars);
   const prefix = "Recent user directions (oldest first; latest overrides):\n";
   const suffix = `\nLatest user direction:\n${boundedText(latest, Math.floor(maxChars / 2))}`;
   const priorBudget = maxChars - prefix.length - suffix.length;
   if (priorBudget < 80) return boundedText(latest, maxChars);
-  while (prior.length > 1 && priorBudget / prior.length < 85) prior.shift();
+  while (prior.length > 1 && priorBudget / prior.length < 85) prior.splice(related ? 1 : 0, 1);
   const perTurn = Math.floor(priorBudget / prior.length) - 5;
   const history = prior.map((turn, index) => `${index + 1}. ${boundedText(turn, perTurn)}`).join("\n");
   return `${prefix}${history}${suffix}`;

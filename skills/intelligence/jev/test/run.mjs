@@ -1499,6 +1499,20 @@ test("task context skips Claude skill text and compaction summaries recorded as 
   assert.equal(activeTaskContext(path), request);
 });
 
+test("a named follow-up recovers its original task beyond the transcript tail", () => {
+  const dir = mkdtempSync(join(tmpdir(), "jev-remote-anchor-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, [
+    { type: "user", message: { role: "user", content: "Review the Evidence River counts and remove obsolete monitor definitions." } },
+    { type: "assistant", message: { role: "assistant", content: "x".repeat(4_100_000) } },
+    { type: "user", message: { role: "user", content: "Fix the unrelated integration test." } },
+    { type: "user", message: { role: "user", content: "Yes, commit the River work as three commits." } },
+  ].map((entry) => JSON.stringify(entry)).join("\n"));
+  const task = activeTaskContext(path);
+  assert.match(task, /Review the Evidence River counts and remove obsolete monitor definitions/);
+  assert.match(task, /Latest user direction:\nYes, commit the River work as three commits/);
+});
+
 test("active task context carries a substantive request through brief follow-ups", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-active-task-"));
   const path = join(dir, "transcript.jsonl");

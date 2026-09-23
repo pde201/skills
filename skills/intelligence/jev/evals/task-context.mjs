@@ -43,7 +43,10 @@ try {
       writeFileSync(filePath, `${item.before}\n`);
     } else mkdirSync(cwd, { recursive: true });
     const transcriptPath = join(cwd, "transcript.jsonl");
-    writeFileSync(transcriptPath, [item.initial, ...(item.intermediate ?? []), item.followup]
+    const transcriptTurns = [item.initial];
+    if (item.paddingBytes) transcriptTurns.push({ type: "assistant", message: { role: "assistant", content: "x".repeat(item.paddingBytes) } });
+    transcriptTurns.push(...(item.intermediate ?? []), item.followup);
+    writeFileSync(transcriptPath, transcriptTurns
       .map((turn) => JSON.stringify(typeof turn === "string" ? { type: "user", message: { role: "user", content: turn } } : turn))
       .join("\n"));
     const tasks = {
@@ -63,7 +66,7 @@ try {
           cwd: item.cwd ?? cwd,
           task: tasks[variant],
           observed: filePath ? [filePath] : [],
-          recentCalls: [],
+          recentCalls: item.recentCalls ?? [],
         });
         results.push({
           caseId: item.id,

@@ -364,10 +364,12 @@ const BLAST_RADIUS = [
  *
  * @param {{toolName?: string, input?: any, cwd?: string}} [call] omit to get every question
  * @param {string[]} [roots] the workspace, from workspaceRoots(); omit to always ask about scope
+ * @param {object[]} [recentCalls] recent calls with failure status
  */
-export function guardQuestions(call, roots) {
+export function guardQuestions(call, roots, recentCalls) {
   const questions = { blast_radius: score("How far do the actual effects of the tool call in `call` reach? Count the resulting changes, not the number of subcommands. Git config/status/revision checks are reads; fetching configured origin updates local tracking refs without changing the worktree or remote; creating a sibling worktree changes project-local files.", BLAST_RADIUS) };
   for (const [id, { question, needsPath, needsOutsideWorkspace }] of Object.entries(HAZARDS)) {
+    if (id === "repeat_failure" && call && !recentCalls?.some((recent) => recent?.failed === true)) continue;
     if (needsPath && call && !namesAPath(call.input)) continue;
     if (needsOutsideWorkspace && call && roots && changesOnlyInsideWorkspace(call, roots)) continue;
     questions[id] = question;
@@ -493,7 +495,7 @@ export async function guard({ toolName, input, cwd, task, recentCalls, recentUse
     .map((path) => typeof path === "string" ? path.match(/^(.*\/\.claude\/projects\/[^/]+\/memory)(?:\/.*)?$/)?.[1] : null)
     .filter(Boolean);
   const roots = workspaceRoots({ cwd, hostRoots, writtenDirs: [...(writtenDirs ?? []), ...agentMemoryDirs] });
-  const questions = guardQuestions({ toolName, input, cwd }, roots);
+  const questions = guardQuestions({ toolName, input, cwd }, roots, recentCalls);
   // A question that was never asked is not a hazard that stayed quiet, and
   // the log has to be able to tell those apart — otherwise a question this
   // gate has silently stopped asking looks exactly like one that is asking

@@ -1217,6 +1217,17 @@ test("a call that does name a path is asked about it as before", () => {
   assert.ok("invented_target" in asked);
 });
 
+test("repeat failure is asked only when a recent tool call actually failed", () => {
+  const call = { toolName: "Bash", input: { command: "git status --short && git fetch -q origin main" } };
+  const successful = [{ tool: "Bash", input: "git log -1", failed: false }];
+  assert.ok(!("repeat_failure" in guardQuestions(call, [], successful)));
+  assert.ok(!("repeat_failure" in guardQuestions(call, [], [])));
+  assert.ok("repeat_failure" in guardQuestions(call, [], [
+    ...successful,
+    { tool: "Bash", input: call.input.command, failed: true },
+  ]));
+});
+
 // ── what counts as the workspace ─────────────────────────────────────
 //
 // `wrong_scope` judged against `cwd` alone read a sibling checkout, a

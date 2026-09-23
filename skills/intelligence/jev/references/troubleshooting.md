@@ -31,8 +31,11 @@ the wait, up to `(JEV_RETRIES + 1) × JEV_TIMEOUT_MS` per judgment. After
 read `jev unavailable: circuit open after N consecutive provider failures
 (last: …); retrying in S s` — no request is made and nothing waits. One
 trial goes out when `JEV_BREAKER_COOLDOWN_MS` has passed; a success closes
-the circuit, a failure re-opens it. Delete `<JEV_STATE_DIR>/breaker.json` to
-reset it by hand.
+the circuit, a failure re-opens it. Breaker state is scoped to the API endpoint
+and credential, so an auth failure in one installation does not pause another
+credential. With the same inherited key and `JEV_STATE_DIR`, `resetBreaker()`
+from `lib/client.mjs` resets that scope; the older unscoped `breaker.json` is
+no longer read.
 
 `TypeSafe 401` or `TypeSafe 403` means authorization was rejected or an edge
 service blocked the request; a 403 HTML page alone does not distinguish those
@@ -114,6 +117,10 @@ labeled set of its own.
 Measure end-to-end latency, including retries and wrapper overhead. The timeout
 is per attempt; it is not a total hook deadline. Record p50/p95, cost, and
 critical-evidence retention rather than only average latency or fewer lines.
+PreToolUse decision logs record `hook_ms` from the start of transcript processing
+through the decision path; the historical `ms` field starts after transcript
+processing. Neither includes host launch overhead, so use wall time for a full
+user-visible measurement.
 
 A failed judgment waits `(JEV_RETRIES + 1) × JEV_TIMEOUT_MS`: 8 s at the
 defaults, which is what every guarded call and wrapped command paid during

@@ -74,11 +74,93 @@ const KNOWN_TOKENS = [
   /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, // JWT
 ];
 const BEARER_TOKEN = /\bBearer\s+[A-Za-z0-9._~+/=-]+/gi;
-const URL_CREDENTIAL = /([a-z][a-z0-9+.-]*:\/\/[^\s/@:]+:)[^\s/@]+@/gi;
 // Covers the common hyphenated, spaced, and contiguous nine-digit forms. The
 // contiguous form also catches nine-digit identifiers that are not SSNs; that
 // over-redaction is accepted because the hooks run against mortgage data.
 const SSN_SHAPED = /\b\d{3}(?:[- ]?\d{2})[- ]?\d{4}\b/g;
+
+function isAsciiLetter(code) {
+  return (code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a);
+}
+
+function isSchemeChar(code) {
+  return isAsciiLetter(code)
+    || (code >= 0x30 && code <= 0x39)
+    || code === 0x2b // +
+    || code === 0x2d // -
+    || code === 0x2e; // .
+}
+
+function isWhitespace(code) {
+  return code === 0x09 // tab
+    || code === 0x0a // line feed
+    || code === 0x0b // vertical tab
+    || code === 0x0c // form feed
+    || code === 0x0d // carriage return
+    || code === 0x20 // space
+    || code === 0xa0 // no-break space
+    || code === 0x1680
+    || (code >= 0x2000 && code <= 0x200a)
+    || code === 0x2028
+    || code === 0x2029
+    || code === 0x202f
+    || code === 0x205f
+    || code === 0x3000
+    || code === 0xfeff;
+}
+
+function isUsernameChar(code) {
+  return !isWhitespace(code) && code !== 0x2f && code !== 0x40 && code !== 0x3a;
+}
+
+function isPasswordChar(code) {
+  return !isWhitespace(code) && code !== 0x2f && code !== 0x40;
+}
+
+/** Redact URL passwords with a single forward scan. */
+function redactUrlCredentials(value) {
+  const pieces = [];
+  let copyFrom = 0;
+  let searchFrom = 0;
+
+  while (true) {
+    const delimiter = value.indexOf("://", searchFrom);
+    if (delimiter < 0) break;
+
+    // The old expression may start at any letter in the scheme-character run
+    // immediately before ://. Walking that run backwards preserves that
+    // behavior without retrying every position in a long letter-only string.
+    let schemeStart = delimiter;
+    while (schemeStart > 0 && isSchemeChar(value.charCodeAt(schemeStart - 1))) schemeStart--;
+    while (schemeStart < delimiter && !isAsciiLetter(value.charCodeAt(schemeStart))) schemeStart++;
+    if (schemeStart === delimiter) {
+      searchFrom = delimiter + 3;
+      continue;
+    }
+
+    const authorityStart = delimiter + 3;
+    let cursor = authorityStart;
+    while (cursor < value.length && isUsernameChar(value.charCodeAt(cursor))) cursor++;
+    if (cursor === authorityStart || cursor >= value.length || value.charCodeAt(cursor) !== 0x3a) {
+      searchFrom = authorityStart;
+      continue;
+    }
+
+    const passwordStart = cursor + 1;
+    cursor = passwordStart;
+    while (cursor < value.length && isPasswordChar(value.charCodeAt(cursor))) cursor++;
+    if (cursor >= value.length || cursor === passwordStart || value.charCodeAt(cursor) !== 0x40) {
+      searchFrom = authorityStart;
+      continue;
+    }
+
+    pieces.push(value.slice(copyFrom, passwordStart), REDACTED, "@");
+    copyFrom = cursor + 1;
+    searchFrom = copyFrom;
+  }
+
+  return copyFrom === 0 ? value : pieces.join("") + value.slice(copyFrom);
+}
 
 // Files that conventionally hold credentials, by path. Used both to ask
 // before one is committed and to ask before one is read.
@@ -131,8 +213,8 @@ export function redactText(value) {
     .replace(BEARER_TOKEN, `Bearer ${REDACTED}`)
     .replace(CREDENTIAL_ASSIGNMENT, `$1${REDACTED}`)
     .replace(ENV_ASSIGNMENT, `$1${REDACTED}`)
-    .replace(URL_CREDENTIAL, `$1${REDACTED}@`)
     .replace(SSN_SHAPED, REDACTED);
+  out = redactUrlCredentials(out);
   for (const pattern of KNOWN_TOKENS) out = out.replace(pattern, REDACTED);
   return out;
 }

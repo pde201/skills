@@ -35,9 +35,11 @@ at it. Stashed Codex prompts are removed at SessionEnd and persist if that
 event never fires. The latest user request is also written to a per-session
 `task-<hash>.txt` for the slimmer (so it no longer travels inline in every
 rewritten command); files older than seven days are swept whenever a new one
-is written, and Codex removes its own at SessionEnd. `breaker.json` holds
-only failure counts, a timestamp and a redacted error message. Text that hosts inject into user turns (system reminders,
-hook notifications, terminal relays) is stripped before harvesting and is not
+is written, and Codex removes its own at SessionEnd. Each
+`breaker-<hash>.json` is keyed by endpoint and credential digest and holds
+only failure counts, a timestamp and a redacted error message. An older
+unscoped `breaker.json` is not read. Text that hosts inject into user turns
+(system reminders, hook notifications, terminal relays) is stripped before harvesting and is not
 carried into briefs or task strings. A successful user-run `git push` is reduced
 to its remote, branch, short commit SHA when available, and success state for guard judgment; the raw terminal
 relay is not sent. Logs and saved output have no automatic

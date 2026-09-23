@@ -273,6 +273,41 @@ test("free-text redaction covers environment-style names and prefixed tokens", a
   assert.equal(redactText("npm run build --workspace=api"), "npm run build --workspace=api", "ordinary text is untouched");
 });
 
+test("URL credential redaction preserves supported shapes and safe URLs", async () => {
+  const { redactText } = await import("../lib/privacy.mjs");
+  for (const [input, expected] of [
+    ["https://alice:secret@example.com", "https://alice:[REDACTED]@example.com"],
+    ["HTTPS+unix://user:p%40ss@host/path", "HTTPS+unix://user:[REDACTED]@host/path"],
+    ["prefix https://first:one@example.com and ftp://second:two@host", "prefix https://first:[REDACTED]@example.com and ftp://second:[REDACTED]@host"],
+    ["https://example.com/path?next=https://other.example", "https://example.com/path?next=https://other.example"],
+    ["https://user:secret.example.com", "https://user:secret.example.com"],
+    ["https://user:secret/example.com", "https://user:secret/example.com"],
+    ["https://:secret@example.com", "https://:secret@example.com"],
+  ]) {
+    assert.equal(redactText(input), expected, input);
+  }
+  assert.doesNotMatch(redactText("https://alice:super-secret@example.com"), /super-secret/);
+});
+
+test("URL credential scanning stays linear for long credential-free text", async () => {
+  const { redactText } = await import("../lib/privacy.mjs");
+  const measure = (input) => {
+    const started = process.hrtime.bigint();
+    const result = redactText(input);
+    const elapsedMs = Number(process.hrtime.bigint() - started) / 1e6;
+    assert.equal(result, input);
+    return elapsedMs;
+  };
+
+  redactText("warmup");
+  const shortMs = measure("a".repeat(8_000));
+  const longMs = measure("a".repeat(64_000));
+  assert.ok(longMs < shortMs * 16 + 400, `expected linear scaling, short=${shortMs.toFixed(2)}ms long=${longMs.toFixed(2)}ms`);
+
+  const longUrlLike = `https://${"a".repeat(40_000)}`;
+  assert.equal(redactText(longUrlLike), longUrlLike);
+});
+
 test("a failed request names its cause: provider status, network error, or timeout", async () => {
   const question = noul("Is this a greeting?");
 

@@ -19,7 +19,7 @@ import {
   triageToolError,
   checkGitSafety,
 } from "../lib/supervision.mjs";
-import { activeTaskContext, recentToolCalls, recentUserActions, observedPaths, writtenDirs } from "../lib/transcript.mjs";
+import { createTranscriptSnapshot, transcriptContext } from "../lib/transcript.mjs";
 import { logDecision } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
 
@@ -43,14 +43,16 @@ const nothing = () => process.exit(0);
 
 async function preToolUse(event) {
   const { tool_name: toolName, tool_input: input, cwd, transcript_path: transcriptPath } = event;
-  const task = activeTaskContext(transcriptPath);
+  const hookStarted = Date.now();
+  const transcript = transcriptContext(createTranscriptSnapshot(transcriptPath));
+  const { snapshot: transcriptSnapshot, task, recentCalls, recentUserActions, observed, writtenDirs } = transcript;
   const started = Date.now();
 
   // Git safety check on commits and pushes
   if (config.gitSafety && toolName === "Bash" && typeof input?.command === "string") {
     const gitCheck = checkGitSafety({ command: input.command, cwd });
     if (gitCheck) {
-      logDecision({ hook: "PreToolUse", tool: "Bash", gitSafety: true, ...gitCheck });
+      logDecision({ hook: "PreToolUse", tool: "Bash", gitSafety: true, ...gitCheck, hook_ms: Date.now() - hookStarted });
       if (gitCheck.decision === "deny" || gitCheck.decision === "ask") {
         return emit({
           hookSpecificOutput: {
@@ -70,14 +72,14 @@ async function preToolUse(event) {
       input,
       cwd,
       task,
-      recentCalls: recentToolCalls(transcriptPath),
-      recentUserActions: recentUserActions(transcriptPath),
-      observed: observedPaths(transcriptPath),
-      writtenDirs: writtenDirs(transcriptPath),
+      recentCalls,
+      recentUserActions,
+      observed,
+      writtenDirs,
     });
   }
-
-  logDecision({
+  const guardMs = Date.now() - started;
+  const logVerdict = (extra = {}) => logDecision({
     hook: "PreToolUse",
     tool: toolName,
     decision: verdict.decision,
@@ -85,11 +87,17 @@ async function preToolUse(event) {
     reason: verdict.reason,
     signals: verdict.signals,
     probabilities: verdict.probabilities,
-    ms: Date.now() - started,
+    // `ms` keeps its historical meaning: time after transcript/task parsing.
+    ms: guardMs,
+    // `hook_ms` is recorded at the final branch so it covers the complete
+    // PreToolUse path, including transcript parsing, supervision, and rewrite.
+    hook_ms: Date.now() - hookStarted,
     cost_usd: verdict.cost,
+    ...extra,
   });
 
   if (verdict.decision === DENY || verdict.decision === ASK) {
+    logVerdict();
     return emit({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
@@ -104,7 +112,7 @@ async function preToolUse(event) {
   let thrashingWarning = null;
   if (config.supervision && transcriptPath) {
     try {
-      const { warning } = await checkGoalDriftAndThrashing({ transcriptPath, latestRequest: task });
+      const { warning } = await checkGoalDriftAndThrashing({ transcriptPath, transcriptSnapshot, latestRequest: task });
       if (warning) {
         thrashingWarning = warning;
         logDecision({ hook: "PreToolUse", thrashingWarning: true });
@@ -119,17 +127,20 @@ async function preToolUse(event) {
       : nothing();
 
   // Allowed. Now: is this a command whose output is going to be bloat?
-  if (toolName !== "Bash") return warningOnly();
+  if (toolName !== "Bash") {
+    logVerdict();
+    return warningOnly();
+  }
 
   const command = input?.command;
   const { wrap, why } = shouldWrap(command);
   if (!wrap) {
-    logDecision({ hook: "PreToolUse", tool: "Bash", wrapped: false, reason: why });
+    logVerdict({ tool: "Bash", wrapped: false, reason: why });
     return warningOnly();
   }
 
   const updated = rewrite(command, task, { key: event.session_id });
-  logDecision({ hook: "PreToolUse", tool: "Bash", wrapped: true, matched: why, command: command.slice(0, 200) });
+  logVerdict({ tool: "Bash", wrapped: true, matched: why, command: command.slice(0, 200) });
 
   return emit({
     hookSpecificOutput: {

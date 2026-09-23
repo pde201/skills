@@ -43,7 +43,7 @@ import {
   triageToolError,
   checkGitSafety,
 } from "../lib/supervision.mjs";
-import { activeTaskContext, recentToolCalls, recentUserActions, observedPaths, writtenDirs } from "../lib/transcript.mjs";
+import { createTranscriptSnapshot, transcriptContext } from "../lib/transcript.mjs";
 import { logDecision, stateDir } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
 
@@ -113,8 +113,8 @@ function dropPrompt(sessionId) {
 }
 
 /** The stash supplies the newest prompt; the transcript supplies its task anchor. */
-const taskFor = (event) =>
-  activeTaskContext(event.transcript_path, { latestPrompt: readStashedPrompt(event.session_id) });
+const taskFor = (event, transcriptSnapshot) =>
+  transcriptContext(transcriptSnapshot, { latestPrompt: readStashedPrompt(event.session_id) });
 
 // ── Command shape ────────────────────────────────────────────────────
 
@@ -159,7 +159,10 @@ export function writeCommand(input, rewritten, found) {
 
 async function preToolUse(event) {
   const { tool_name: toolName, tool_input: input, cwd } = event;
-  const task = taskFor(event);
+  const hookStarted = Date.now();
+  const transcriptSnapshot = createTranscriptSnapshot(event.transcript_path);
+  const transcript = taskFor(event, transcriptSnapshot);
+  const { task, recentCalls, recentUserActions, observed, writtenDirs } = transcript;
   const started = Date.now();
 
   // Git safety check on commits and pushes
@@ -175,6 +178,7 @@ async function preToolUse(event) {
           gitSafety: true,
           decision: gitCheck.decision,
           reason: gitCheck.reason,
+          hook_ms: Date.now() - hookStarted,
         });
         if (gitCheck.decision === "deny" || gitCheck.decision === "ask") {
           return emit({
@@ -196,14 +200,14 @@ async function preToolUse(event) {
       input,
       cwd,
       task,
-      recentCalls: recentToolCalls(event.transcript_path),
-      recentUserActions: recentUserActions(event.transcript_path),
-      observed: observedPaths(event.transcript_path),
-      writtenDirs: writtenDirs(event.transcript_path),
+      recentCalls,
+      recentUserActions,
+      observed,
+      writtenDirs,
     });
   }
-
-  logDecision({
+  const guardMs = Date.now() - started;
+  const logVerdict = (extra = {}) => logDecision({
     agent: "codex",
     hook: "PreToolUse",
     tool: toolName,
@@ -212,11 +216,17 @@ async function preToolUse(event) {
     reason: verdict.reason,
     signals: verdict.signals,
     probabilities: verdict.probabilities,
-    ms: Date.now() - started,
+    // `ms` keeps its historical meaning: time after transcript/task parsing.
+    ms: guardMs,
+    // `hook_ms` is recorded at the final branch so it covers the complete
+    // PreToolUse path, including transcript parsing and command rewriting.
+    hook_ms: Date.now() - hookStarted,
     cost_usd: verdict.cost,
+    ...extra,
   });
 
   if (verdict.decision === DENY || verdict.decision === ASK) {
+    logVerdict();
     return emit({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
@@ -226,15 +236,16 @@ async function preToolUse(event) {
     });
   }
 
-  if (toolName !== "Bash") return nothing();
+  if (toolName !== "Bash") {
+    logVerdict();
+    return nothing();
+  }
 
   const found = readCommand(input);
   if (!found) {
     // Worth a line in the log rather than silence: if Codex ever changes
     // the shape again, this is the entry that says slimming stopped.
-    logDecision({
-      agent: "codex",
-      hook: "PreToolUse",
+    logVerdict({
       tool: "Bash",
       wrapped: false,
       reason: "no command found in tool_input",
@@ -245,13 +256,11 @@ async function preToolUse(event) {
 
   const { wrap, why } = shouldWrap(found.command);
   if (!wrap) {
-    logDecision({ agent: "codex", hook: "PreToolUse", tool: "Bash", wrapped: false, reason: why });
+    logVerdict({ tool: "Bash", wrapped: false, reason: why });
     return nothing();
   }
 
-  logDecision({
-    agent: "codex",
-    hook: "PreToolUse",
+  logVerdict({
     tool: "Bash",
     wrapped: true,
     matched: why,
@@ -320,7 +329,8 @@ async function sessionEnd(event) {
   if (config.dodGate && event.transcript_path) {
     try {
       // Codex gives this event three seconds. One attempt, well inside it.
-      const dod = await checkDefinitionOfDone({ transcriptPath: event.transcript_path, timeoutMs: 1500, retries: 0 });
+      const transcriptSnapshot = createTranscriptSnapshot(event.transcript_path);
+      const dod = await checkDefinitionOfDone({ transcriptPath: event.transcript_path, transcriptSnapshot, timeoutMs: 1500, retries: 0 });
       if (!dod.allow) {
         logDecision({ agent: "codex", hook: "SessionEnd", unverified: true, reason: dod.reason });
       }

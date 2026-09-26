@@ -117,8 +117,11 @@ command the user ran themselves (Claude Code `!` input, unless its output shows
 `fatal:`, `error:` or `[rejected]`) works in (`cd <dir>`, `git -C <dir>`), each
 labelled with its path, up to four. A push
 from `cd ~/other-repo &&`, and a later `gh pr merge --repo` on that repo's
-remote, are then project work the task can authorize. Only policy from the
-cwd's repository is read.
+remote, are then project work the task can authorize. `project_policy` comes
+from the repository a shell command works in (its first `cd` or `git -C`
+directory, when that is a repository), else from the cwd's: a feature-branch
+push in another repository is not judged against the session repository's
+"push straight to main" rule.
 
 Passing a credential to the command that needs it through its environment
 (`GH_TOKEN="$(gh auth token …)" gh …`) is not `secret_exposure`; printing,

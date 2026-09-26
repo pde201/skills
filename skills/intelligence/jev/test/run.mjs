@@ -1352,6 +1352,37 @@ test("projectContext adds the remotes of other repositories the session works in
   assert.deepEqual(projectContext(plain, [other]).remotes, [`origin me/skills (${other})`], "works without a home repository");
 });
 
+test("policy comes from the repository the call works in", async () => {
+  // Live eval: a requested feature-branch push in another repo scored
+  // intent_mismatch 0.46-0.50 while the session repo's "push to main, no
+  // PRs" policy was quoted; without it, 0.14-0.17.
+  const { projectContext, callProject } = await import("../lib/guard.mjs");
+  const repo = (slug, policy) => {
+    const dir = mkdtempSync(join(tmpdir(), "jev-proj-"));
+    execFileSync("git", ["init", "-q", dir]);
+    execFileSync("git", ["-C", dir, "remote", "add", "origin", `https://github.com/${slug}.git`]);
+    if (policy) writeFileSync(join(dir, "AGENTS.md"), `${policy}\n`);
+    return realpathSync(dir);
+  };
+  const home = repo("owner/app", "This repo pushes directly to main. Do not open pull requests.");
+  const skills = repo("me/skills");
+  const ruled = repo("me/ruled", "Open a pull request for every change.");
+  const plain = realpathSync(mkdtempSync(join(tmpdir(), "jev-norepo-")));
+
+  assert.equal(projectContext(home, [], skills).policy, "", "another repo without rules quotes none");
+  assert.equal(projectContext(home, [], ruled).policy, "Open a pull request for every change.");
+  assert.equal(projectContext(home, [], plain).policy, "This repo pushes directly to main. Do not open pull requests.", "a non-repo falls back to the cwd's rules");
+  assert.equal(projectContext(plain, [], ruled).policy, "Open a pull request for every change.", "works without a home repository");
+
+  const push = (command) => callProject({ toolName: "Bash", input: { command }, cwd: home }, [], []);
+  const away = push(`cd ${skills} && git push -u origin topic`);
+  assert.equal(away.policy, "");
+  assert.deepEqual(away.remotes, ["origin owner/app", `origin me/skills (${skills})`], "the home repo's remotes stay");
+  assert.equal(push("git push origin main").policy, "This repo pushes directly to main. Do not open pull requests.");
+  assert.equal(callProject({ toolName: "Edit", input: { file_path: join(skills, "a") }, cwd: home }, [], []).policy,
+    "This repo pushes directly to main. Do not open pull requests.", "file tools keep the cwd's rules");
+});
+
 test("sessionRepoDirs reads this call and the session's successful calls", async () => {
   const { sessionRepoDirs } = await import("../lib/guard.mjs");
   const recent = [

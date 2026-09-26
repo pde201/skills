@@ -453,14 +453,32 @@ const remotesOf = (top) => [...new Set(git(top, ["remote", "-v"]).split("\n")
 
 const MAX_OTHER_REPOS = 4;
 
+function policyOf(top) {
+  const files = config.policyFiles.length
+    ? config.policyFiles.map((f) => normalizePath(f, top))
+    : ["AGENTS.md", "CLAUDE.md"].map((f) => join(top, f));
+  for (const file of files) {
+    let policy = "";
+    try {
+      policy = policyExcerpt(readFileSync(file, "utf8"));
+    } catch {
+      continue;
+    }
+    if (policy) return policy;
+  }
+  return "";
+}
+
 /**
  * The project the call runs in: its remotes and the workflow rules its own
  * agent instructions state, plus the remotes of other repositories in
- * `otherDirs` (labelled with their path). Every part fails soft to empty —
- * this only adds context, and a hook must never fail because git or a file
- * is missing.
+ * `otherDirs` (labelled with their path). The rules come from the repository
+ * `policyFrom` lies in when it is one — a push in another repository answers
+ * to that repository's rules, not the session's — else from the cwd's. Every
+ * part fails soft to empty — this only adds context, and a hook must never
+ * fail because git or a file is missing.
  */
-export function projectContext(cwd, otherDirs = []) {
+export function projectContext(cwd, otherDirs = [], policyFrom) {
   const base = cwd || process.cwd();
   const top = git(base, ["rev-parse", "--show-toplevel"]);
   const others = [];
@@ -470,21 +488,17 @@ export function projectContext(cwd, otherDirs = []) {
     if (other && other !== top && !others.includes(other)) others.push(other);
   }
   const otherRemotes = others.flatMap((other) => remotesOf(other).map((remote) => `${remote} (${other})`));
-  if (!top) return { remotes: otherRemotes, policy: "" };
-  const remotes = [...remotesOf(top), ...otherRemotes];
-  const files = config.policyFiles.length
-    ? config.policyFiles.map((f) => normalizePath(f, top))
-    : ["AGENTS.md", "CLAUDE.md"].map((f) => join(top, f));
-  let policy = "";
-  for (const file of files) {
-    try {
-      policy = policyExcerpt(readFileSync(file, "utf8"));
-    } catch {
-      continue;
-    }
-    if (policy) break;
-  }
-  return { remotes, policy };
+  const policyTop = (policyFrom && git(policyFrom, ["rev-parse", "--show-toplevel"])) || top;
+  return {
+    remotes: top ? [...remotesOf(top), ...otherRemotes] : otherRemotes,
+    policy: policyTop ? policyOf(policyTop) : "",
+  };
+}
+
+/** projectContext for one call: remotes the session works with, rules of the repo the call works in. */
+export function callProject(call, recentCalls, userCommands) {
+  const workDir = call.toolName === "Bash" ? commandDirs(call.input?.command, call.cwd)[0] : undefined;
+  return projectContext(call.cwd, sessionRepoDirs(call, recentCalls, userCommands), workDir);
 }
 
 const changesOnlyInsideWorkspace = (call, roots) => {
@@ -686,7 +700,7 @@ export async function guard({ toolName, input, cwd, task, recentCalls, recentUse
   // and finding nothing.
   const skippedQuestions = Object.keys(HAZARDS).filter((id) => !(id in questions));
 
-  const project = projectContext(cwd, sessionRepoDirs({ toolName, input, cwd }, recentCalls, userCommands));
+  const project = callProject({ toolName, input, cwd }, recentCalls, userCommands);
   const segments = toolName === "Bash" ? shellSegments(input?.command) : [];
 
   let res;

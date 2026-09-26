@@ -66,7 +66,7 @@ Guard interruptions name their source in the host prompt:
 `Jev approval request (local check)`. Blocks say `Jev blocked call` instead.
 These are Jev decisions; the host may still apply its own permission prompt.
 The model estimate compares an edit with the current task text. For brief
-follow-ups such as “continue,” “retry …,” option selections, and scope amendments, Jev
+follow-ups such as “continue,” “retry …,” option selections (“option 2”, and replies that pick from the assistant’s numbered options: “1, 2 and 3”, “all”, “implement all”, which also carry that assistant message), and scope amendments, Jev
 includes recent user directions in chronological order and treats the latest
 direction as controlling. Independent new requests stand alone, and explicit
 replacement instructions end the older task context. If `intent_mismatch`

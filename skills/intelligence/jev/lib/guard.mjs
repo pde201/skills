@@ -436,12 +436,13 @@ export function commandDirs(command, cwd) {
  * Directories this call and the session's successful calls work in. A repo
  * the session already pushed to from another cwd is the task's project too.
  */
-export function sessionRepoDirs(call, recentCalls) {
+export function sessionRepoDirs(call, recentCalls, userCommands = []) {
   const dirs = call?.toolName === "Bash" ? commandDirs(call.input?.command, call.cwd) : [];
   for (const recent of recentCalls ?? []) {
     if (recent?.failed || typeof recent?.input !== "string") continue;
     dirs.push(...commandDirs(recent.input, call?.cwd));
   }
+  for (const command of userCommands ?? []) dirs.push(...commandDirs(command, call?.cwd));
   return [...new Set(dirs)];
 }
 
@@ -649,7 +650,7 @@ export function decide(probabilities, radius) {
 /**
  * @returns {Promise<{decision: string, reason: string, by: string, signals?: object, cost?: number}>}
  */
-export async function guard({ toolName, input, cwd, task, recentCalls, recentUserActions, observed, hostRoots, writtenDirs, model } = {}) {
+export async function guard({ toolName, input, cwd, task, recentCalls, recentUserActions, userCommands, observed, hostRoots, writtenDirs, model } = {}) {
   const pass = (reason) => ({ decision: ALLOW, reason, by: "code" });
   const promptLabel = (decision, source) =>
     `Jev ${decision === ASK ? "approval request" : "blocked call"} (${source}):`;
@@ -685,7 +686,7 @@ export async function guard({ toolName, input, cwd, task, recentCalls, recentUse
   // and finding nothing.
   const skippedQuestions = Object.keys(HAZARDS).filter((id) => !(id in questions));
 
-  const project = projectContext(cwd, sessionRepoDirs({ toolName, input, cwd }, recentCalls));
+  const project = projectContext(cwd, sessionRepoDirs({ toolName, input, cwd }, recentCalls, userCommands));
   const segments = toolName === "Bash" ? shellSegments(input?.command) : [];
 
   let res;

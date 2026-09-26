@@ -112,8 +112,10 @@ from `AGENTS.md`, then `CLAUDE.md`; point `JEV_POLICY_FILES` elsewhere if the
 rules live in another file. An explicit user instruction still outranks policy.
 
 The project is not only the session's cwd. `project_remotes` also lists the
-remotes of other repositories this call or an earlier successful call works in
-(`cd <dir>`, `git -C <dir>`), each labelled with its path, up to four. A push
+remotes of other repositories this call, an earlier successful call, or a
+command the user ran themselves (Claude Code `!` input, unless its output shows
+`fatal:`, `error:` or `[rejected]`) works in (`cd <dir>`, `git -C <dir>`), each
+labelled with its path, up to four. A push
 from `cd ~/other-repo &&`, and a later `gh pr merge --repo` on that repo's
 remote, are then project work the task can authorize. Only policy from the
 cwd's repository is read.

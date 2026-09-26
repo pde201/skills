@@ -120,7 +120,7 @@ async function preToolUse(event) {
   const cwd = toolCall?.args?.Cwd || workspacePaths?.[0] || process.cwd();
   const hookStarted = Date.now();
   const transcript = transcriptContext(createTranscriptSnapshot(transcriptPath));
-  const { snapshot: transcriptSnapshot, task, recentCalls, recentUserActions, observed, writtenDirs } = transcript;
+  const { snapshot: transcriptSnapshot, task, recentCalls, recentUserActions, userCommands, observed, writtenDirs } = transcript;
   const started = Date.now();
 
   // Git safety check on commits and pushes
@@ -153,6 +153,7 @@ async function preToolUse(event) {
       task,
       recentCalls,
       recentUserActions,
+      userCommands,
       observed,
       // Antigravity names its workspace folders; they are the workspace.
       hostRoots: Array.isArray(workspacePaths) ? workspacePaths : [],

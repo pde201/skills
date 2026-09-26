@@ -335,6 +335,26 @@ export function recentUserActions(path) {
   return result.slice();
 }
 
+const COMMAND_FAILED = /!\s*\[rejected\]|\bfatal:|\berror:/i;
+
+/**
+ * Shell commands the human ran themselves (Claude Code `!` input) that did
+ * not visibly fail, newest last. Context for where the session works — which
+ * repositories — never an instruction.
+ */
+export function recentUserCommands(path, { limit = 12 } = {}) {
+  const commands = [];
+  for (const entry of entriesFor(path)) {
+    if (entry?.origin?.kind !== "human" || entry?.isMeta === true) continue;
+    const raw = textOf(entry.message?.content ?? entry.content);
+    const command = raw.match(/<bash-input>([\s\S]*?)<\/bash-input>/)?.[1]?.trim();
+    if (!command) continue;
+    const output = `${raw.match(/<bash-stdout>([\s\S]*?)<\/bash-stdout>/)?.[1] ?? ""}\n${raw.match(/<bash-stderr>([\s\S]*?)<\/bash-stderr>/)?.[1] ?? ""}`;
+    if (!COMMAND_FAILED.test(output)) commands.push(command);
+  }
+  return commands.slice(-limit);
+}
+
 /** Recent tool calls and whether they failed — the context for "is this a repeat?". */
 function parseToolCalls(entries) {
   const calls = [];
@@ -488,6 +508,7 @@ export function transcriptContext(source, { latestPrompt = "", maxChars = 2000 }
     task: activeTaskContext(snapshot, { latestPrompt, maxChars }),
     recentCalls: recentToolCalls(snapshot),
     recentUserActions: recentUserActions(snapshot),
+    userCommands: recentUserCommands(snapshot),
     observed: observedPaths(snapshot),
     writtenDirs: writtenDirs(snapshot),
   };

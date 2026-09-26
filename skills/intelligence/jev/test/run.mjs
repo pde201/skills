@@ -1733,6 +1733,19 @@ test("active task context carries a substantive request through brief follow-ups
   assert.equal(activeTaskContext(path, { latestPrompt: "Hello." }), "Hello.");
 });
 
+test("a retry after a block keeps the request it retries", () => {
+  // Logged: "retry the push, go ahead for all steps" stood alone, so the
+  // merge the earlier turn asked for scored intent_mismatch 0.81.
+  const dir = mkdtempSync(join(tmpdir(), "jev-retry-task-"));
+  const path = join(dir, "transcript.jsonl");
+  writeFileSync(path, JSON.stringify({ type: "user", message: { role: "user", content: "push, open a PR, merge and install" } }));
+
+  assert.match(activeTaskContext(path, { latestPrompt: "retry the push, go ahead for all steps" }), /merge and install/);
+  assert.match(activeTaskContext(path, { latestPrompt: "Try again." }), /merge and install/);
+  assert.match(activeTaskContext(path, { latestPrompt: "Retry the merge" }), /merge and install/);
+  assert.equal(activeTaskContext(path, { latestPrompt: "Retrying logic in the client needs a backoff." }), "Retrying logic in the client needs a backoff.");
+});
+
 test("active task context carries a bounded assistant proposal for a short approval", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-approval-context-"));
   const path = join(dir, "transcript.jsonl");

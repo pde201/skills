@@ -128,7 +128,7 @@ export function latestUserRequest(path, { maxChars = 1500 } = {}) {
 
 // Short steering and selection replies depend on the preceding task. An
 // independent request stands alone so old work cannot silently widen it.
-const FOLLOWUP = /^(?:please\s+)?(?:continue|resume|proceed|keep going|go on|carry on|go ahead|do it|(?:signed|logged) in[,;:]?\s+(?:go ahead|continue|proceed)|option\s+[a-z0-9]+|yes\b|yeah\b|yep\b|sure\b|okay\b|ok\b|agreed\b|approved\b|confirm(?:ed)?\b|confirm all\b|let'?s park\b|park\b|once\b|also\b|but\b|and\b|stop after\b|stop when\b)\b/i;
+const FOLLOWUP = /^(?:please\s+)?(?:continue|resume|proceed|keep going|go on|carry on|go ahead|do it|retry|try again|(?:signed|logged) in[,;:]?\s+(?:go ahead|continue|proceed)|option\s+[a-z0-9]+|yes\b|yeah\b|yep\b|sure\b|okay\b|ok\b|agreed\b|approved\b|confirm(?:ed)?\b|confirm all\b|let'?s park\b|park\b|once\b|also\b|but\b|and\b|stop after\b|stop when\b)\b/i;
 const RESET_TASK = /^(?:instead\b|forget\b|new task\b|switch to\b|stop(?:[.!?]?\s*$| working on\b))/i;
 const SHORT_APPROVAL = /^(?:yes|yeah|yep|sure|okay|ok|agreed|approved|confirm(?:ed)?|go ahead|do it|proceed|option\s+[a-z0-9]+)(?:[.!?])?$/i;
 const APPROVAL_PREFIX = /^(?:yes|yeah|yep|sure|okay|ok|agreed|approved|confirm(?:ed)?|go ahead|do it|proceed|option\s+[a-z0-9]+)\b/i;

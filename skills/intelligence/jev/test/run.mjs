@@ -1417,6 +1417,22 @@ test("wrong_scope is not asked about a file change inside the workspace, and alw
   assert.ok("intent_mismatch" in guardQuestions(call("Edit", { file_path: "/srv/app/src/a.ts" }), roots), "only scope is skipped");
 });
 
+test("intent_mismatch is not asked about a file change in the agent's memory or session scratchpad", () => {
+  const memory = join(osHomedir(), ".claude", "projects", "-srv-app", "memory");
+  const scratch = "/private/tmp/claude-502/-srv-app/0be88f56-44a5-42e5-8e33-bdc88d5793b3/scratchpad";
+  const call = (toolName, input) => ({ toolName, input, cwd: "/srv/app" });
+
+  const memoryEdit = guardQuestions(call("Edit", { file_path: join(memory, "project_log.md") }));
+  assert.ok(!("intent_mismatch" in memoryEdit), "memory upkeep");
+  assert.ok("destructive_unrequested" in memoryEdit, "destruction is still judged");
+  assert.ok(!("intent_mismatch" in guardQuestions(call("Write", { file_path: "/tmp/claude-502/-srv-app/abc/scratchpad/q.sql" }))), "scratchpad via /tmp");
+  assert.ok(!("intent_mismatch" in guardQuestions(call("apply_patch", { patch: `*** Update File: ${scratch}/a.mjs\n*** Add File: ${memory}/b.md\n` }))), "every target agent-owned");
+  assert.ok("intent_mismatch" in guardQuestions(call("apply_patch", { patch: `*** Update File: ${scratch}/a.mjs\n*** Update File: src/a.ts\n` })), "one project file is enough to ask");
+  assert.ok("intent_mismatch" in guardQuestions(call("Edit", { file_path: join(osHomedir(), ".claude", "settings.json") })), "other .claude files are not upkeep");
+  assert.ok("intent_mismatch" in guardQuestions(call("Write", { file_path: "/tmp/other/scratchpad/x" })), "an arbitrary tmp dir is not the session scratchpad");
+  assert.ok("intent_mismatch" in guardQuestions(call("Bash", { command: `rm ${scratch}/a.mjs` })), "a shell command is left to the model");
+});
+
 test("writtenDirs collects the directories of successful file writes only", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-written-"));
   const path = join(dir, "transcript.jsonl");

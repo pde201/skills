@@ -1753,6 +1753,31 @@ test("a new human task clears an older push observation", () => {
   assert.deepEqual(recentUserActions(path), []);
 });
 
+test("user-run commands feed the repositories the session works in", async () => {
+  // Logged: the user pushed another repo themselves (`cd … && git push`), then
+  // the requested merge on that repo scored wrong_scope 0.56 — the push was
+  // not an agent call, so nothing tied that repo to the session.
+  const { recentUserCommands } = await import("../lib/transcript.mjs");
+  const { sessionRepoDirs } = await import("../lib/guard.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "jev-user-commands-"));
+  const path = join(dir, "transcript.jsonl");
+  const run = (command, stdout, stderr = "") => ({ type: "user", origin: { kind: "human" }, message: { role: "user",
+    content: `<bash-input>${command}</bash-input><bash-stdout>${stdout}</bash-stdout><bash-stderr>${stderr}</bash-stderr>` } });
+  writeFileSync(path, [
+    { type: "user", origin: { kind: "human" }, message: { role: "user", content: "push, open a PR, merge and install" } },
+    run(`cd /w/skills && GH_TOKEN="$(gh auth token --user me)" git push -u origin topic`, "To https://github.com/me/skills.git\n * [new branch] topic -&gt; topic"),
+    run("cd /w/other && git push origin main", "", "! [rejected] main -> main (fetch first)"),
+    { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "<bash-input>cd /w/fake</bash-input>" }] } },
+  ].map((entry) => JSON.stringify(entry)).join("\n"));
+
+  const commands = recentUserCommands(path);
+  assert.deepEqual(commands, [`cd /w/skills && GH_TOKEN="$(gh auth token --user me)" git push -u origin topic`]);
+  assert.deepEqual(
+    sessionRepoDirs({ toolName: "Bash", input: { command: "gh pr merge 16 --repo me/skills" }, cwd: "/w/app" }, [], commands),
+    ["/w/skills"],
+  );
+});
+
 test("active task context carries a substantive request through brief follow-ups", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-active-task-"));
   const path = join(dir, "transcript.jsonl");

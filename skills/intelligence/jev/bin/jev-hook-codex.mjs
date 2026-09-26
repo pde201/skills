@@ -162,7 +162,7 @@ async function preToolUse(event) {
   const hookStarted = Date.now();
   const transcriptSnapshot = createTranscriptSnapshot(event.transcript_path);
   const transcript = taskFor(event, transcriptSnapshot);
-  const { task, recentCalls, recentUserActions, observed, writtenDirs } = transcript;
+  const { task, recentCalls, recentUserActions, userCommands, observed, writtenDirs } = transcript;
   const started = Date.now();
 
   // Git safety check on commits and pushes
@@ -202,6 +202,7 @@ async function preToolUse(event) {
       task,
       recentCalls,
       recentUserActions,
+      userCommands,
       observed,
       writtenDirs,
     });

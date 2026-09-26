@@ -73,6 +73,22 @@ const NOT_READS = [
   "sleep 5 &",
   "npm test",
   "xargs rm < files.txt",
+  "sed -ni 's/a/b/' f",
+  "sed -Ei 's/a/b/' f",
+  "sort -ro out f",
+  "fd -xrm",
+  "fd --exec=rm x",
+  "sed '1w out' f",
+  "sed -n '$w out' f",
+  "sed \"1w out\" f",
+  "sed 's/a/b/e' f",
+  "awk -f prog.awk f",
+  "awk 'BEGIN{print ENVIRON[\"GITHUB_TOKEN\"]}'",
+  "jq -n 'env.GITHUB_TOKEN'",
+  "jq -n '$ENV.GITHUB_TOKEN'",
+  "jq -f prog.jq f.json",
+  "gh auth status -t",
+  "echo \"don't $TOKEN\" 'x'",
 ];
 
 test("read-only commands are recognised", () => {
@@ -92,6 +108,13 @@ test("a read-only shell command skips the model", async () => {
 test("a read-only command naming a credential file still reaches the model", async () => {
   const verdict = await guard({ toolName: "Bash", input: { command: "cat ~/.aws/credentials" }, cwd: process.cwd(), task: "x" });
   assert.equal(verdict.reason, "no api key");
+});
+
+test("reads of files that may hold credentials still reach the model", async () => {
+  for (const command of ["cat ~/.pgpass", "grep DSN ~/.zshenv", "jq . ~/.claude/settings.json", "cat ~/.config/gh/hosts.yml"]) {
+    const verdict = await guard({ toolName: "Bash", input: { command }, cwd: process.cwd(), task: "x" });
+    assert.equal(verdict.reason, "no api key", command);
+  }
 });
 
 test("rerunning a read that just failed still reaches the model", async () => {

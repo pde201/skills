@@ -493,21 +493,24 @@ const READ_COMMANDS = new Set([
   "du", "df", "which", "type", "pwd", "date", "whoami", "diff", "sort", "uniq", "cut", "tr", "awk",
   "sed", "basename", "dirname", "realpath", "readlink", "test", "true", "column", "nl", "echo", "printf",
 ]);
-// Options that make an otherwise read-only command write a file or run one.
+// Options that make an otherwise read-only command write a file, run one,
+// or read its program from a file. Short options may be clustered (`-ni`).
 const WRITING_OPTIONS = {
-  sed: /^(-i|--in-place)/,
+  sed: /^-[^-]*i|^--in-place/,
   find: /^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/,
-  sort: /^(-o|--output)/,
+  sort: /^-[^-]*o|^--output/,
   tree: /^-o$/,
   rg: /^--pre(=|$)/,
-  fd: /^(-x|--exec|-X|--exec-batch)$/,
+  fd: /^-[^-]*[xX]|^--exec/,
+  awk: /^-[flE]|^--(file|load|include|exec)/,
+  jq: /^-f|^--from-file/,
 };
 const GIT_READ = new Set([
   "status", "log", "diff", "show", "rev-parse", "ls-files", "ls-tree", "blame", "describe",
   "shortlog", "grep", "cat-file", "merge-base", "check-ignore", "branch", "stash", "worktree",
   "config", "tag", "remote",
 ]);
-const GH_READ = /^gh\s+(run\s+(view|list|watch)|pr\s+(view|list|checks|diff|status)|issue\s+(view|list|status)|repo\s+view|release\s+(view|list)|auth\s+status(?!.*--show-token)|api\s)/;
+const GH_READ = /^gh\s+(run\s+(view|list|watch)|pr\s+(view|list|checks|diff|status)|issue\s+(view|list|status)|repo\s+view|release\s+(view|list)|auth\s+status(?!.*(--show-token|\s-t\b))|api\s)/;
 const GH_API_WRITE = /\s(-X|--method)\s*(?!GET\b)\S|\s(-f|-F|--field|--raw-field|--input)(\s|=)/;
 // Redirects that discard or merge output write nothing.
 const HARMLESS_REDIRECT = /\d?>&\d|&?\d?>\s*\/dev\/null/g;
@@ -548,9 +551,10 @@ function pieceReads(piece) {
   if (!READ_COMMANDS.has(head)) return false;
   const args = argv.slice(1);
   if (WRITING_OPTIONS[head] && args.some((a) => WRITING_OPTIONS[head].test(a))) return false;
-  // Writes and command execution hidden inside the program text.
-  if (head === "awk" && /system\s*\(|[>|]|getline/.test(piece)) return false;
-  if (head === "sed" && /\/[gpiImM0-9]*[we]\b|(^|[;{}\s'])[wWe]\s/.test(args.join(" "))) return false;
+  // Writes, command execution and environment reads inside the program text.
+  if (head === "awk" && /system\s*\(|[>|]|getline|ENVIRON/.test(piece)) return false;
+  if (head === "jq" && /\benv\b|\$ENV/.test(piece)) return false;
+  if (head === "sed" && args.some((a) => !a.startsWith("-") && /(^|[^a-zA-Z\\])[wWe](\s|$|['"])/.test(a))) return false;
   if (head === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1) return false;
   return true;
 }
@@ -562,7 +566,7 @@ function pieceReads(piece) {
  */
 export function readOnlyCommand(command) {
   if (typeof command !== "string" || !command.trim()) return false;
-  const bare = command.replace(/'[^']*'/g, "''").replace(HARMLESS_REDIRECT, " ");
+  const bare = words(command).map((w) => (/^'[\s\S]*'$/.test(w) ? "''" : w)).join(" ").replace(HARMLESS_REDIRECT, " ");
   if (/\$|`|<<|<\(|>|\btee\b|&\s*$|(^|[^&])&(?!&)/.test(bare)) return false;
   const segments = shellSegments(command);
   for (const segment of segments.length ? segments : [command.trim()]) {
@@ -575,9 +579,15 @@ export function readOnlyCommand(command) {
   return true;
 }
 
+// Files that can hold credentials without looking like a key file: a
+// password file, gh's token store, shell startup files that export them,
+// and agent settings with an `env` block. Naming one sends the read to the
+// model rather than asking outright.
+const MAY_HOLD_CREDENTIALS = /(^|\/)(\.pgpass|\.zshenv|\.zshrc|\.bashrc|\.bash_profile|\.profile|\.claude\.json)$|\/gh\/hosts\.ya?ml$|\/\.claude\/settings(\.local)?\.json$/;
+
 /** Does a read-only command name a file that usually holds credentials? */
 const namesSecretFile = (command) =>
-  words(command).map(unquoteWord).some((word) => !word.startsWith("-") && looksLikeSecretFile(word));
+  words(command).map(unquoteWord).some((word) => !word.startsWith("-") && (looksLikeSecretFile(word) || MAY_HOLD_CREDENTIALS.test(word)));
 
 /** The commands of one pipeline, split on `|` outside quotes. */
 function pipelineParts(segment) {

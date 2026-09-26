@@ -464,6 +464,121 @@ function shellOnlyAgentOwned(command, cwd) {
   return true;
 }
 
+/**
+ * Is the newest earlier run of this same call a failure? A failure the user
+ * has since answered with a new message is not a blind retry: the human turn
+ * is the "change that would fix the cause".
+ */
+function retriesAFailure(call, recentCalls) {
+  const signature = callSignature(call.toolName, call.input);
+  const lastSameCall = [...(recentCalls ?? [])].reverse().find((recent) => {
+    if (recent?.tool !== call.toolName) return false;
+    if (recent.signature) return recent.signature === signature;
+    // Synthetic and legacy callers may only supply an untruncated Bash command.
+    return call.toolName === "Bash" && recent.input === call.input?.command;
+  });
+  return lastSameCall?.failed === true && !lastSameCall.beforeUserTurn;
+}
+
+// ── Read-only shell commands ─────────────────────────────────────────
+//
+// Half of all shell calls only look: `git status`, `rg`, `sed -n`, `gh run
+// view`. The judgment layer cannot find a hazard in them that code cannot —
+// the read-only gate in decide() lets only exposure and repeated failure
+// speak on a read — so they skip the model round trip. The classifier is
+// deliberately narrow: anything it does not recognise goes to the model.
+
+const READ_COMMANDS = new Set([
+  "cd", "ls", "cat", "head", "tail", "wc", "rg", "grep", "fd", "find", "tree", "jq", "stat", "file",
+  "du", "df", "which", "type", "pwd", "date", "whoami", "diff", "sort", "uniq", "cut", "tr", "awk",
+  "sed", "basename", "dirname", "realpath", "readlink", "test", "true", "column", "nl", "echo", "printf",
+]);
+// Options that make an otherwise read-only command write a file or run one.
+const WRITING_OPTIONS = {
+  sed: /^(-i|--in-place)/,
+  find: /^-(delete|exec|execdir|ok|okdir|fprint|fprint0|fprintf|fls)$/,
+  sort: /^(-o|--output)/,
+  tree: /^-o$/,
+  rg: /^--pre(=|$)/,
+  fd: /^(-x|--exec|-X|--exec-batch)$/,
+};
+const GIT_READ = new Set([
+  "status", "log", "diff", "show", "rev-parse", "ls-files", "ls-tree", "blame", "describe",
+  "shortlog", "grep", "cat-file", "merge-base", "check-ignore", "branch", "stash", "worktree",
+  "config", "tag", "remote",
+]);
+const GH_READ = /^gh\s+(run\s+(view|list|watch)|pr\s+(view|list|checks|diff|status)|issue\s+(view|list|status)|repo\s+view|release\s+(view|list)|auth\s+status(?!.*--show-token)|api\s)/;
+const GH_API_WRITE = /\s(-X|--method)\s*(?!GET\b)\S|\s(-f|-F|--field|--raw-field|--input)(\s|=)/;
+// Redirects that discard or merge output write nothing.
+const HARMLESS_REDIRECT = /\d?>&\d|&?\d?>\s*\/dev\/null/g;
+
+const words = (piece) => piece.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+const unquoteWord = (word) => word.replace(/^(["'])([\s\S]*)\1$/, "$2");
+
+function gitReads(args) {
+  // `-c key=value` can set a pager or alias that runs anything.
+  let i = 0;
+  while (args[i]?.startsWith("-")) {
+    if (args[i] === "-c") return false;
+    i += args[i] === "-C" ? 2 : 1;
+  }
+  const sub = args[i];
+  const rest = args.slice(i + 1);
+  if (!GIT_READ.has(sub) || rest.some((a) => /^--output(=|$)/.test(a))) return false;
+  const positional = rest.filter((a) => !a.startsWith("-"));
+  switch (sub) {
+    case "branch":
+      return positional.length === 0 && !rest.some((a) => /^-[dDmMcCfu]$|^--(delete|move|copy|force|set-upstream|unset-upstream|edit-description)/.test(a));
+    case "stash": return ["list", "show"].includes(rest[0]);
+    case "worktree": return rest[0] === "list";
+    case "tag": return positional.length === 0 || rest.some((a) => a === "-l" || a === "--list");
+    case "remote": return positional.length === 0 || positional[0] === "get-url";
+    case "config":
+      return (rest[0] === "--get" || rest[0] === "--get-all") && rest.length === 2
+        && !/credential|token|password|secret|extraheader/i.test(rest[1]);
+    default: return true;
+  }
+}
+
+function pieceReads(piece) {
+  const argv = words(piece);
+  const head = argv[0];
+  if (head === "git") return gitReads(argv.slice(1).map(unquoteWord));
+  if (head === "gh") return GH_READ.test(piece) && !(/^gh\s+api\s/.test(piece) && GH_API_WRITE.test(piece));
+  if (!READ_COMMANDS.has(head)) return false;
+  const args = argv.slice(1);
+  if (WRITING_OPTIONS[head] && args.some((a) => WRITING_OPTIONS[head].test(a))) return false;
+  // Writes and command execution hidden inside the program text.
+  if (head === "awk" && /system\s*\(|[>|]|getline/.test(piece)) return false;
+  if (head === "sed" && /\/[gpiImM0-9]*[we]\b|(^|[;{}\s'])[wWe]\s/.test(args.join(" "))) return false;
+  if (head === "uniq" && args.filter((a) => !a.startsWith("-")).length > 1) return false;
+  return true;
+}
+
+/**
+ * Does this shell command provably only read? Lexical and conservative:
+ * substitutions, heredocs, redirects to files, variable expansion and
+ * leading assignments are all enough to say no.
+ */
+export function readOnlyCommand(command) {
+  if (typeof command !== "string" || !command.trim()) return false;
+  const bare = command.replace(/'[^']*'/g, "''").replace(HARMLESS_REDIRECT, " ");
+  if (/\$|`|<<|<\(|>|\btee\b|&\s*$|(^|[^&])&(?!&)/.test(bare)) return false;
+  const segments = shellSegments(command);
+  for (const segment of segments.length ? segments : [command.trim()]) {
+    const pieces = pipelineParts(segment.replace(HARMLESS_REDIRECT, " "));
+    if (!pieces.length) return false;
+    for (const piece of pieces) {
+      if (/^\w+=/.test(piece) || !pieceReads(piece)) return false;
+    }
+  }
+  return true;
+}
+
+/** Does a read-only command name a file that usually holds credentials? */
+const namesSecretFile = (command) =>
+  words(command).map(unquoteWord).some((word) => !word.startsWith("-") && looksLikeSecretFile(word));
+
 /** The commands of one pipeline, split on `|` outside quotes. */
 function pipelineParts(segment) {
   const parts = [];
@@ -500,17 +615,8 @@ export const changesOnlyAgentOwned = (call) => {
  */
 export function guardQuestions(call, roots, recentCalls) {
   const questions = { blast_radius: BLAST_RADIUS_QUESTION };
-  const signature = call && callSignature(call.toolName, call.input);
-  const lastSameCall = [...(recentCalls ?? [])].reverse().find((recent) => {
-    if (recent?.tool !== call?.toolName) return false;
-    if (recent.signature) return recent.signature === signature;
-    // Synthetic and legacy callers may only supply an untruncated Bash command.
-    return call?.toolName === "Bash" && recent.input === call.input?.command;
-  });
   for (const [id, { question, needsPath, needsOutsideWorkspace }] of Object.entries(HAZARDS)) {
-    // A failure the user has since answered with a new message is not a
-    // blind retry: the human turn is the "change that would fix the cause".
-    if (id === "repeat_failure" && call && (lastSameCall?.failed !== true || lastSameCall.beforeUserTurn)) continue;
+    if (id === "repeat_failure" && call && !retriesAFailure(call, recentCalls)) continue;
     if (needsPath && call && !namesAPath(call.input)) continue;
     if (needsOutsideWorkspace && call && roots && changesOnlyInsideWorkspace(call, roots)) continue;
     if (id === "intent_mismatch" && call && changesOnlyAgentOwned(call)) continue;
@@ -642,6 +748,14 @@ export async function guard({ toolName, input, cwd, task, recentCalls, recentUse
       return { decision: ASK, reason: `${promptLabel(ASK, "local check")} ${path} usually holds credentials. Confirm before it is read.`, by: "code" };
     }
     return pass("read-only tool: deterministic checks only");
+  }
+
+  // The same trade for a shell command that only reads, as long as neither
+  // hazard that speaks on a read could: a credential file sends it to the
+  // model, and so does a rerun of the same command that just failed.
+  if (toolName === "Bash" && !config.guardReadsWithModel && readOnlyCommand(input?.command)
+    && !namesSecretFile(input.command) && !retriesAFailure({ toolName, input }, recentCalls)) {
+    return pass("read-only shell command: deterministic checks only");
   }
 
   if (!haveKey()) return pass("no api key");

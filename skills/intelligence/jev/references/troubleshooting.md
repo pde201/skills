@@ -111,6 +111,17 @@ issues the user asked for — should not read as `wrong_scope`. Policy lines com
 from `AGENTS.md`, then `CLAUDE.md`; point `JEV_POLICY_FILES` elsewhere if the
 rules live in another file. An explicit user instruction still outranks policy.
 
+The project is not only the session's cwd. `project_remotes` also lists the
+remotes of other repositories this call or an earlier successful call works in
+(`cd <dir>`, `git -C <dir>`), each labelled with its path, up to four. A push
+from `cd ~/other-repo &&`, and a later `gh pr merge --repo` on that repo's
+remote, are then project work the task can authorize. Only policy from the
+cwd's repository is read.
+
+Passing a credential to the command that needs it through its environment
+(`GH_TOKEN="$(gh auth token …)" gh …`) is not `secret_exposure`; printing,
+logging, writing or sending it elsewhere is.
+
 Every PreToolUse log record carries `session_id`, `cwd`, a one-line `call`
 summary and a `task_hash`, so an ask can be traced to its call and the request
 in force without the transcript.

@@ -8,7 +8,7 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, statSync } from "node:fs";
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync, statSync, realpathSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -1320,6 +1320,50 @@ test("projectContext reads the repository's remotes and policy", async () => {
   assert.deepEqual(remotes, ["origin owner/repo"]);
   assert.equal(policy, "This repo pushes directly to main.");
   assert.deepEqual(projectContext(mkdtempSync(join(tmpdir(), "jev-norepo-"))), { remotes: [], policy: "" });
+});
+
+test("commandDirs finds the directories a shell command works in", async () => {
+  const { commandDirs } = await import("../lib/guard.mjs");
+  assert.deepEqual(commandDirs("cd ~/work/skills && git push -q origin HEAD", "/srv/app"), [join((await import("node:os")).homedir(), "work/skills")]);
+  assert.deepEqual(commandDirs(`git -C /a/b status; cd "/c d" && ls`, "/srv/app"), ["/a/b", "/c d"]);
+  assert.deepEqual(commandDirs("cd sub && make", "/srv/app"), ["/srv/app/sub"]);
+  assert.deepEqual(commandDirs("echo cd /x", "/srv/app"), [], "cd inside an argument is not a cd");
+  assert.deepEqual(commandDirs("cd $REPO && git push", "/srv/app"), [], "an unresolved variable is not guessed");
+  assert.deepEqual(commandDirs(undefined, "/srv/app"), []);
+});
+
+test("projectContext adds the remotes of other repositories the session works in", async () => {
+  // Logged: from a session in one repo, a push and merges on another repo the
+  // user named scored wrong_scope 0.51-0.70, four times in one day.
+  const { projectContext } = await import("../lib/guard.mjs");
+  const repo = (slug) => {
+    const dir = mkdtempSync(join(tmpdir(), "jev-proj-"));
+    execFileSync("git", ["init", "-q", dir]);
+    execFileSync("git", ["-C", dir, "remote", "add", "origin", `https://github.com/${slug}.git`]);
+    return realpathSync(dir);
+  };
+  const home = repo("owner/app");
+  const other = repo("me/skills");
+  mkdirSync(join(other, "lib"));
+  const plain = mkdtempSync(join(tmpdir(), "jev-norepo-"));
+
+  const { remotes } = projectContext(home, [join(other, "lib"), other, plain, home]);
+  assert.deepEqual(remotes, ["origin owner/app", `origin me/skills (${other})`]);
+  assert.deepEqual(projectContext(plain, [other]).remotes, [`origin me/skills (${other})`], "works without a home repository");
+});
+
+test("sessionRepoDirs reads this call and the session's successful calls", async () => {
+  const { sessionRepoDirs } = await import("../lib/guard.mjs");
+  const recent = [
+    { tool: "Bash", input: "cd /w/skills && git push -q origin topic", failed: false },
+    { tool: "Bash", input: "cd /w/denied && git push", failed: true },
+    { tool: "Edit", input: "/w/app/src/a.ts", failed: false },
+  ];
+  assert.deepEqual(
+    sessionRepoDirs({ toolName: "Bash", input: { command: "git -C /w/now log" }, cwd: "/w/app" }, recent),
+    ["/w/now", "/w/skills"],
+  );
+  assert.deepEqual(sessionRepoDirs({ toolName: "Edit", input: { file_path: "/w/app/a" }, cwd: "/w/app" }, []), []);
 });
 
 test("answers to the agent's questions join the task until the user writes again", async () => {

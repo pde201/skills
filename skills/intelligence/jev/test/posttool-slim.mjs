@@ -16,7 +16,9 @@ const INSTALL = join(ROOT, "install.sh");
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), "jev-posttool-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
-  const env = { ...process.env, HOME: dir, JEV_STATE_DIR: join(dir, "state"),
+  // A version-manager shim (mise, asdf) resolves no node under a fresh HOME;
+  // the node running this test is the one the installer should find.
+  const env = { ...process.env, PATH: `${dirname(process.execPath)}:${process.env.PATH}`, HOME: dir, JEV_STATE_DIR: join(dir, "state"),
     JEV_LOG: join(dir, "log.jsonl"), JEV_RETRIES: "0", JEV_HOOKS_SLIM: "1" };
   delete env.TYPESAFE_API_KEY;
   return { dir, env };

@@ -3,7 +3,7 @@
 // No key is set, so a call that reaches the model layer passes as "no api key".
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -11,7 +11,8 @@ process.env.JEV_STATE_DIR = mkdtempSync(join(tmpdir(), "jev-readonly-"));
 delete process.env.TYPESAFE_API_KEY;
 delete process.env.JEV_GUARD_READ_MODEL;
 
-const { readOnlyCommand, guard } = await import("../lib/guard.mjs");
+const { readOnlyCommand } = await import("../lib/shell.mjs");
+const { guard } = await import("../lib/guard.mjs");
 
 const READS = [
   "git status --short",
@@ -114,6 +115,17 @@ test("reads of files that may hold credentials still reach the model", async () 
   for (const command of ["cat ~/.pgpass", "grep DSN ~/.zshenv", "jq . ~/.claude/settings.json", "cat ~/.config/gh/hosts.yml"]) {
     const verdict = await guard({ toolName: "Bash", input: { command }, cwd: process.cwd(), task: "x" });
     assert.equal(verdict.reason, "no api key", command);
+  }
+});
+
+test("credential stores ask before the Read tool opens them", async () => {
+  const home = mkdtempSync(join(tmpdir(), "jev-creds-"));
+  mkdirSync(join(home, ".config/gh"), { recursive: true });
+  const files = [join(home, ".pgpass"), join(home, ".config/gh/hosts.yml")];
+  for (const file of files) writeFileSync(file, "x\n");
+  for (const file_path of files) {
+    const verdict = await guard({ toolName: "Read", input: { file_path }, cwd: process.cwd(), task: "x" });
+    assert.equal(verdict.decision, "ask", file_path);
   }
 });
 

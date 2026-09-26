@@ -19,7 +19,8 @@ for installation, troubleshooting, data handling, and evaluation.
   `AGENTS.md`/`CLAUDE.md` (or `JEV_POLICY_FILES`), and each part of a compound
   shell command. Provably read-only shell commands skip the model unless they
   name a credential file or repeat a failed call. The question text lives in
-  `lib/guard-questions.mjs`.
+  `lib/guard-questions.mjs`; shell parsing and the read-only classifier in
+  `lib/shell.mjs`.
 - `lib/wrap.mjs` decides which shell commands are worth routing through the
   slimmer, skips short inspections, bounded pipelines, and known secret-output commands,
   and builds the rewrite; `lib/config.mjs` holds every knob and default.

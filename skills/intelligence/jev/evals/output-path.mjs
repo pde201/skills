@@ -34,7 +34,7 @@ const report = {
   missedTrims: 0,
   byReason: {},
 };
-const candidateReasons = new Set(["bounded inspection output", "may print credentials"]);
+const candidateReasons = new Set(["bounded inspection output", "stdout capped below slimming threshold", "may print credentials"]);
 
 for (const line of raw.split("\n")) {
   let row;

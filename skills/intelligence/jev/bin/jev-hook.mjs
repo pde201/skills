@@ -13,6 +13,8 @@
 
 import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
 import { shouldWrap, rewrite } from "../lib/wrap.mjs";
+import { slim } from "../lib/slim.mjs";
+import { haveKey } from "../lib/client.mjs";
 import { buildBrief, consumeBrief } from "../lib/carryforward.mjs";
 import {
   checkGoalDriftAndThrashing,
@@ -24,6 +26,10 @@ import { logDecision } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
 
 const GUARDED_TOOLS = new Set(["Bash", "Edit", "Write", "NotebookEdit", "Read"]);
+// Installed explicitly by `JEV_CLAUDE_POST_SLIM=1 ./install.sh claude`.
+// The pilot covers Maven only; other commands retain the wrapper. This keeps
+// the extra PostToolUse process off the path of unrelated Bash calls.
+const POST_SLIM = process.argv.includes("--post-slim");
 
 async function readStdin() {
   const chunks = [];
@@ -139,6 +145,11 @@ async function preToolUse(event) {
     return warningOnly();
   }
 
+  if (POST_SLIM && why === "mvn") {
+    logVerdict({ tool: "Bash", wrapped: false, postSlimCandidate: true, matched: why });
+    return warningOnly();
+  }
+
   const updated = rewrite(command, task, { key: event.session_id });
   logVerdict({ tool: "Bash", wrapped: true, matched: why, command: command.slice(0, 200) });
 
@@ -148,6 +159,50 @@ async function preToolUse(event) {
       ...withWarning({ updatedInput: { ...input, command: updated } }),
     },
     systemMessage: `jev: routing ${why} output through the slimmer`,
+  });
+}
+
+// ── PostToolUse (opt-in Claude Code output replacement) ─────────────
+
+async function postToolUse(event) {
+  if (!POST_SLIM || !config.slim || !haveKey() || event.tool_name !== "Bash") return nothing();
+  const command = event.tool_input?.command;
+  const response = event.tool_response;
+  const candidate = shouldWrap(command);
+  if (!candidate.wrap || candidate.why !== "mvn" || !response || typeof response !== "object" ||
+      typeof response.stdout !== "string" || response.interrupted || response.isImage ||
+      (typeof response.exitCode === "number" && response.exitCode !== 0)) return nothing();
+
+  const output = response.stdout;
+  // A host-truncated response is not a recoverable "full output". Leave it
+  // unchanged; the command wrapper remains available for that workload.
+  if (/\.\.\. \[\d+ characters truncated\] \.\.\./.test(output)) return nothing();
+  if (output.split("\n").length < config.slimMinLines) return nothing();
+
+  const started = Date.now();
+  let result;
+  try {
+    const task = transcriptContext(createTranscriptSnapshot(event.transcript_path)).task;
+    result = await slim(output, { task, command, minLines: config.slimMinLines, model: config.model });
+  } catch {
+    return nothing();
+  }
+  logDecision({
+    hook: "PostToolUse",
+    tool: "Bash",
+    changed: result.changed,
+    reason: result.reason,
+    lines_in: output.split("\n").length,
+    lines_out: result.text.split("\n").length,
+    post_ms: Date.now() - started,
+    cost_usd: result.cost,
+  });
+  if (!result.changed || result.text === output) return nothing();
+  return emit({
+    hookSpecificOutput: {
+      hookEventName: "PostToolUse",
+      updatedToolOutput: { ...response, stdout: result.text },
+    },
   });
 }
 
@@ -214,6 +269,8 @@ async function main() {
   switch (event.hook_event_name) {
     case "PreToolUse":
       return await preToolUse(event);
+    case "PostToolUse":
+      return await postToolUse(event);
     case "PostToolUseFailure":
       return await postToolUseFailure(event);
     case "PreCompact":

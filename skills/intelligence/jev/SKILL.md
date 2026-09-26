@@ -55,6 +55,11 @@ receives an explicit `allow` from Jev.
   diagnostic summary with a private full-stdout copy; use only after checking
   evidence retention for the task. `jev-slim filter` cannot observe its
   upstream exit status.
+- Claude Code's opt-in `PostToolUse` pilot shortens only successful Maven stdout.
+  It leaves Maven commands and host permissions alone; other commands still
+  use the wrapper. The host may
+  truncate output before Jev sees it; use the standard wrapper if a complete
+  recoverable output is required. See [host integration](references/integrations.md).
 - Invalid or unavailable model judgments leave output intact and add no model
   restriction. Deterministic checks still apply. A circuit breaker pauses
   remote judgments after repeated provider failures and retries one trial

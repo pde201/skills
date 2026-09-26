@@ -37,7 +37,8 @@ node evals/runner.mjs --mode live --input /path/to/held-out-live-traces.json --f
 ## Output-path replay
 
 Run `npm run eval:output-path -- --log /path/to/jev-log.jsonl` to compare
-recorded slimmer calls with the current narrow wrapper exclusions. The report
+recorded slimmer calls with the current narrow wrapper exclusions, including
+pipelines whose final `head` caps stdout below the threshold. The report
 contains counts only; it never prints commands or output. Legacy commands
 logged at the 200-character limit are excluded because their tail is unknown.
 `--since ISO_DATE` selects a later collection window. Exit 1 means a command
@@ -50,6 +51,38 @@ skip rule.
 `npm run eval:wrapper` measures direct versus wrapped no-op process wall time
 with the provider key removed. It is a repeatable startup-overhead baseline,
 not a latency measurement for a real build or a prediction of tokens saved.
+`npm run eval:posttool` compares a short synthetic command run directly, through
+the wrapper, and directly followed by the Claude `PostToolUse` hook. It likewise
+excludes the host and remote provider, so it cannot establish a real-workload
+speedup. A post-tool hook launch can offset the shell wrapper it removes.
+
+For the Claude Code Maven `PostToolUse` pilot, compare the same harmless
+command in standard and opt-in installations. Record the host version, permission prompts,
+whether the command ran once, tool-result shape, the model-visible stdout and
+full-output recovery path, stderr, exit status, and end-to-end p50/p95 time.
+Measure short and long successes and a failed command. A synthetic adapter
+event proves Jev emits a valid candidate response, but only a recorded host
+run proves Claude Code applied `updatedToolOutput`. Keep the pilot opt-in if
+the host ignores the rewrite, truncates output before the hook, or costs more
+wall time than the wrapper for the target workload.
+
+`npm run eval:claude-posttool-host` runs one isolated Claude Code print-mode
+session with a synthetic `mvn test` executable that prints 120 lines and a
+local mock Jev provider. It requires an authenticated `claude` CLI and makes
+one paid Claude model call.
+The temporary project disables session persistence and loads only its test
+settings. Its aggregate report checks that the hook changed the output and
+the model-visible tool result contains Jev's recovery footer. This verifies
+one host build, not performance across real builds or other hosts.
+
+On 2026-09-23, Claude Code 2.1.280 on macOS ran the synthetic Maven command
+once in the isolated print-mode session. The mock Jev provider received one
+request, the PostToolUse hook reported a change, and the model-visible tool
+result contained the recovery footer. No real Maven build, other host, or
+provider was tested. In a separate 20-round no-provider process benchmark,
+direct execution plus the post hook was about the same median time as the
+wrapper for a short synthetic command; this pilot does not establish a speed
+gain.
 
 The opt-in `JEV_SLIM_FAILURES=1` trial has synthetic regression tests for
 diagnostic retention and private recovery. Real failed-output retention is

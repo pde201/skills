@@ -43,6 +43,26 @@ test("bounded metadata avoids a wrapper, while compound and high-output commands
   }
 });
 
+test("a final head below the line threshold bypasses the wrapper", () => {
+  for (const command of [
+    "kubectl get pods | head -n 20",
+  ]) {
+    assert.deepEqual(shouldWrap(command), { wrap: false, why: "stdout capped below slimming threshold" }, command);
+  }
+  assert.equal(shouldWrap("aws s3 ls s3://example | tail -n 10").wrap, false);
+  for (const command of [
+    "kubectl get pods",
+    "kubectl get pods | head -n 59",
+    "kubectl get pods | head -n 20 && mvn test",
+    "kubectl get pods | head -n 20; mvn test",
+    "kubectl get pods | head -n 20 > out.txt",
+    "kubectl get pods || mvn test | head -n 20",
+    "mvn test 'literal | head -n 20'",
+  ]) {
+    assert.equal(shouldWrap(command).wrap, true, command);
+  }
+});
+
 test("credential-bearing output stays out of remote slimming", () => {
   for (const command of [
     "aws secretsmanager get-secret-value --secret-id example",

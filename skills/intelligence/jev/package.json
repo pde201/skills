@@ -27,12 +27,14 @@
   },
   "license": "MIT",
   "scripts": {
-    "test": "node --test test/run.mjs test/client-privacy.mjs test/carryforward-regressions.mjs test/operations.mjs test/breaker.mjs test/transcript-snapshot.mjs test/output-path.mjs",
+    "test": "node --test test/run.mjs test/client-privacy.mjs test/carryforward-regressions.mjs test/operations.mjs test/breaker.mjs test/transcript-snapshot.mjs test/output-path.mjs test/posttool-slim.mjs",
     "eval:self-test": "node --test evals/self-test.mjs",
     "eval": "node evals/runner.mjs",
     "eval:live": "node evals/runner.mjs --mode live",
     "eval:output-path": "node evals/output-path.mjs",
     "eval:wrapper": "node evals/wrapper-benchmark.mjs",
+    "eval:posttool": "node evals/posttool-benchmark.mjs",
+    "eval:claude-posttool-host": "node evals/claude-posttool-host.mjs --run",
     "eval:task-context": "node evals/task-context.mjs"
   }
 }

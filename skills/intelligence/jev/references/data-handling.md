@@ -4,7 +4,12 @@
 `TYPESAFE_BASE_URL` overrides the endpoint). Guard state includes task, working
 directory, workspace roots (the cwd, host workspace folders, directories the
 session has written to, the temp directory, `JEV_WORKSPACE_ROOTS`), tool input,
-recent calls, confirmed user-run push outcomes, and observed paths. Slimming includes task, command, and output
+the parts of a compound shell command, recent calls, confirmed user-run push
+outcomes, and observed paths. It also includes the repository's remotes reduced
+to `name owner/repo` (URLs and credentials are not sent), lines about commits,
+branches and pushes from the repository's `AGENTS.md`/`CLAUDE.md` (or
+`JEV_POLICY_FILES`), and answers the user gave to the agent's structured
+questions since their latest message. Slimming includes task, command, and output
 blocks. Compaction includes candidate history and current
 task. These can contain source code, personal data, and business information.
 

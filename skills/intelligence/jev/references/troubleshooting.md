@@ -93,6 +93,29 @@ work. A worktree in an unrelated shared directory and a command that exposes
 an auth token remain hazards. Check the actual command and user request before
 labeling a prompt false.
 
+A `repeat_failure` question is not asked when the user has written a new
+message since the failed call: the reply is the change a retry needed (for
+example "create the label and continue"). A retry with no user turn between
+still asks.
+
+Work on the repository's own remotes that the task needs — pushing where the
+project's policy says work lands by pushing, or creating a label while filing
+issues the user asked for — should not read as `wrong_scope`. Policy lines come
+from `AGENTS.md`, then `CLAUDE.md`; point `JEV_POLICY_FILES` elsewhere if the
+rules live in another file. An explicit user instruction still outranks policy.
+
+Every PreToolUse log record carries `session_id`, `cwd`, a one-line `call`
+summary and a `task_hash`, so an ask can be traced to its call and the request
+in force without the transcript.
+
+`JEV_GUARD_SOFT_UNTIL` is an opt-in soft band, off by default. Set above
+`JEV_GUARD_ASK_AT` (for example 0.55), asks from `intent_mismatch`,
+`wrong_scope`, `invented_target` or `repeat_failure` that all score below it —
+on calls that are not wide-reaching — proceed, and the concern is passed to the
+model as a note. Destruction and credential exposure are never softened. The
+evidence behind 0.55 is four labeled incidents (2026-09-25/26), not a
+calibration set; see below before making it a default.
+
 ## Tune from evidence
 
 First label expected behavior and inspect applicability, then wording, then

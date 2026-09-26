@@ -23,6 +23,7 @@ import {
 } from "../lib/supervision.mjs";
 import { createTranscriptSnapshot, transcriptContext } from "../lib/transcript.mjs";
 import { logDecision } from "../lib/log.mjs";
+import { createHash } from "node:crypto";
 import config from "../lib/config.mjs";
 
 const GUARDED_TOOLS = new Set(["Bash", "Edit", "Write", "NotebookEdit", "Read"]);
@@ -30,6 +31,13 @@ const GUARDED_TOOLS = new Set(["Bash", "Edit", "Write", "NotebookEdit", "Read"])
 // The pilot covers Maven only; other commands retain the wrapper. This keeps
 // the extra PostToolUse process off the path of unrelated Bash calls.
 const POST_SLIM = process.argv.includes("--post-slim");
+
+/** One line naming what a call did: a command's head, or the file it targets. */
+function callSummary(toolName, input) {
+  if (typeof input?.command === "string") return input.command.replace(/\s+/g, " ").trim().slice(0, 160);
+  const path = input?.file_path ?? input?.notebook_path;
+  return typeof path === "string" ? path : undefined;
+}
 
 async function readStdin() {
   const chunks = [];
@@ -88,6 +96,12 @@ async function preToolUse(event) {
   const logVerdict = (extra = {}) => logDecision({
     hook: "PreToolUse",
     tool: toolName,
+    // Enough to tie a decision back to its call and the request in force,
+    // without a transcript: the log is otherwise unauditable after the fact.
+    session_id: event.session_id,
+    cwd,
+    call: callSummary(toolName, input),
+    task_hash: task ? createHash("sha256").update(task).digest("hex").slice(0, 12) : undefined,
     decision: verdict.decision,
     by: verdict.by,
     reason: verdict.reason,
@@ -125,10 +139,11 @@ async function preToolUse(event) {
       }
     } catch {}
   }
+  const contextNote = [verdict.advisory, thrashingWarning].filter(Boolean).join("\n\n");
   const withWarning = (hookSpecificOutput = {}) =>
-    thrashingWarning ? { ...hookSpecificOutput, additionalContext: thrashingWarning } : hookSpecificOutput;
+    contextNote ? { ...hookSpecificOutput, additionalContext: contextNote } : hookSpecificOutput;
   const warningOnly = () =>
-    thrashingWarning
+    contextNote
       ? emit({ hookSpecificOutput: { hookEventName: "PreToolUse", ...withWarning() } })
       : nothing();
 

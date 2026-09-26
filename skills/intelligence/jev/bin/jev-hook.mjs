@@ -105,7 +105,7 @@ async function preToolUse(event) {
   const command = input?.command;
   const { wrap, why } = shouldWrap(command);
   if (!wrap) {
-    logVerdict({ tool: "Bash", wrapped: false, reason: why });
+    logVerdict({ tool: "Bash", wrapped: false, wrap_reason: why });
     return warningOnly();
   }
 

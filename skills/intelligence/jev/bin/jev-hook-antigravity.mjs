@@ -20,19 +20,17 @@
 //  Fails open, always exit 0, same as every other entry point here.
 // ──────────────────────────────────────────────────────────────────────
 
-import { realpathSync, readFileSync, unlinkSync } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createHash } from "node:crypto";
 
-import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
+import { judge, readStdin, emit, nothing, isEntryPoint, ASK, DENY } from "../lib/hook-core.mjs";
 import { shouldWrap, rewrite } from "../lib/wrap.mjs";
 import { consumeBrief } from "../lib/carryforward.mjs";
 import {
   checkGoalDriftAndThrashing,
   checkDefinitionOfDone,
   triageToolError,
-  checkGitSafety,
 } from "../lib/supervision.mjs";
 import { createTranscriptSnapshot, transcriptContext, recentToolCalls } from "../lib/transcript.mjs";
 import { logDecision, stateDir } from "../lib/log.mjs";
@@ -49,20 +47,6 @@ const EXPLICIT_ALLOW = /^(1|true|yes|on)$/i.test(process.env.JEV_ANTIGRAVITY_EXP
 const SHELL_TOOLS = new Set(["run_command"]);
 const READ_TOOLS = new Set(["view_file", "read_file"]);
 const PATH_KEYS = ["AbsolutePath", "Path", "FilePath", "TargetFile", "File"];
-
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
-  const raw = Buffer.concat(chunks).toString("utf8").trim();
-  return raw ? JSON.parse(raw) : {};
-}
-
-const emit = (payload) => {
-  if (payload) process.stdout.write(JSON.stringify(payload));
-  process.exit(0);
-};
-
-const nothing = () => process.exit(0);
 
 /**
  * Translate an Antigravity tool call into the shape lib/guard.mjs checks.
@@ -120,80 +104,35 @@ async function preToolUse(event) {
   const cwd = toolCall?.args?.Cwd || workspacePaths?.[0] || process.cwd();
   const hookStarted = Date.now();
   const transcript = transcriptContext(createTranscriptSnapshot(transcriptPath));
-  const { snapshot: transcriptSnapshot, task, recentCalls, recentUserActions, userCommands, observed, writtenDirs } = transcript;
-  const started = Date.now();
+  const { task } = transcript;
+  const command = toolCall?.name === "run_command" && typeof toolCall?.args?.CommandLine === "string"
+    ? toolCall.args.CommandLine
+    : undefined;
 
-  // Git safety check on commits and pushes
-  if (config.gitSafety && toolCall?.name === "run_command" && typeof toolCall?.args?.CommandLine === "string") {
-    const gitCheck = checkGitSafety({
-      command: toolCall.args.CommandLine,
-      cwd,
-    });
-    if (gitCheck) {
-      logDecision({
-        agent: "antigravity",
-        hook: "PreToolUse",
-        tool: "run_command",
-        gitSafety: true,
-        decision: gitCheck.decision,
-        reason: gitCheck.reason,
-        hook_ms: Date.now() - hookStarted,
-      });
-      if (gitCheck.decision === "deny") return emit({ decision: "deny", reason: gitCheck.reason });
-      if (gitCheck.decision === "ask") return emit({ decision: "ask", reason: gitCheck.reason });
-    }
-  }
-
-  let verdict = { decision: ALLOW, reason: "not guarded", by: "code" };
-  if (config.guard) {
-    verdict = await guard({
-      toolName,
-      input,
-      cwd,
-      task,
-      recentCalls,
-      recentUserActions,
-      userCommands,
-      observed,
-      // Antigravity names its workspace folders; they are the workspace.
-      hostRoots: Array.isArray(workspacePaths) ? workspacePaths : [],
-      writtenDirs,
-    });
-
-  }
-
-  const guardMs = Date.now() - started;
-  const logVerdict = (extra = {}) => logDecision({
+  const verdict = await judge({
     agent: "antigravity",
-    hook: "PreToolUse",
     tool: toolCall?.name,
-    mapped_to: toolName,
-    decision: verdict.decision,
-    by: verdict.by,
-    reason: verdict.reason,
-    signals: verdict.signals,
-    probabilities: verdict.probabilities,
-    // `ms` keeps its historical meaning: time after transcript/task parsing.
-    ms: guardMs,
-    // `hook_ms` is recorded at the final branch so it covers the complete
-    // PreToolUse path, including transcript parsing and command rewriting.
-    hook_ms: Date.now() - hookStarted,
-    cost_usd: verdict.cost,
-    ...extra,
+    toolName,
+    input,
+    cwd,
+    command,
+    // Guard off means no guard at all here, deterministic checks included.
+    guarded: config.guard,
+    // Antigravity names its workspace folders; they are the workspace.
+    hostRoots: Array.isArray(workspacePaths) ? workspacePaths : [],
+    transcript,
+    hookStarted,
+    logFields: { mapped_to: toolName },
   });
+  const logVerdict = verdict.log;
 
-  if (config.guard && verdict.decision === DENY) {
-    logVerdict();
-    return emit({ decision: "deny", reason: verdict.reason });
-  }
-  if (config.guard && verdict.decision === ASK) {
-    logVerdict();
-    return emit({ decision: "ask", reason: verdict.reason });
+  if (verdict.decision === DENY || verdict.decision === ASK) {
+    if (config.guard) logVerdict();
+    return emit({ decision: verdict.decision, reason: verdict.reason });
   }
 
   // Allowed. Check if this is a command whose output is going to be bloat.
-  if (config.slim && toolCall?.name === "run_command" && typeof toolCall?.args?.CommandLine === "string") {
-    const command = toolCall.args.CommandLine;
+  if (config.slim && command) {
     const { wrap, why } = shouldWrap(command);
     if (wrap) {
       const updated = rewrite(command, task, { key: event.conversationId || event.session_id });
@@ -392,13 +331,7 @@ async function main() {
   return await preToolUse(event);
 }
 
-const runningAsHook = (() => {
-  try {
-    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return false;
-  }
-})();
+const runningAsHook = isEntryPoint(import.meta.url);
 
 if (runningAsHook) {
   main().catch((err) => {

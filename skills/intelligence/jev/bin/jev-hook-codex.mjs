@@ -29,20 +29,14 @@
 //  in exit 0. A hook is never the reason a session fails.
 // ──────────────────────────────────────────────────────────────────────
 
-import { writeFileSync, readFileSync, unlinkSync, existsSync, realpathSync, renameSync } from "node:fs";
+import { writeFileSync, readFileSync, unlinkSync, existsSync, renameSync } from "node:fs";
 import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
 
-import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
+import { judge, readStdin, emit, nothing, isEntryPoint, ASK, DENY } from "../lib/hook-core.mjs";
 import { shouldWrap, rewrite, dropTask } from "../lib/wrap.mjs";
 import { buildBrief, consumeBrief } from "../lib/carryforward.mjs";
-import {
-  checkGoalDriftAndThrashing,
-  checkDefinitionOfDone,
-  triageToolError,
-  checkGitSafety,
-} from "../lib/supervision.mjs";
+import { checkDefinitionOfDone, triageToolError } from "../lib/supervision.mjs";
 import { createTranscriptSnapshot, transcriptContext } from "../lib/transcript.mjs";
 import { logDecision, stateDir } from "../lib/log.mjs";
 import config from "../lib/config.mjs";
@@ -57,20 +51,6 @@ const GUARDED_TOOLS = new Set(["Bash", "apply_patch", "Edit", "Write", "Read"]);
 // rewrite goes out on its own, and anyone whose Codex build ignores an
 // unpaired `updatedInput` can opt into the pairing knowingly.
 const SLIM_SELF_APPROVES = /^(1|true|yes|on)$/i.test(process.env.JEV_CODEX_SLIM_ALLOW ?? "");
-
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
-  const raw = Buffer.concat(chunks).toString("utf8").trim();
-  return raw ? JSON.parse(raw) : {};
-}
-
-const emit = (payload) => {
-  if (payload) process.stdout.write(JSON.stringify(payload));
-  process.exit(0);
-};
-
-const nothing = () => process.exit(0);
 
 // ── The prompt stash ─────────────────────────────────────────────────
 
@@ -162,69 +142,19 @@ async function preToolUse(event) {
   const hookStarted = Date.now();
   const transcriptSnapshot = createTranscriptSnapshot(event.transcript_path);
   const transcript = taskFor(event, transcriptSnapshot);
-  const { task, recentCalls, recentUserActions, userCommands, observed, writtenDirs } = transcript;
-  const started = Date.now();
+  const { task } = transcript;
 
-  // Git safety check on commits and pushes
-  if (toolName === "Bash" && config.gitSafety) {
-    const foundCmd = readCommand(input);
-    if (foundCmd) {
-      const gitCheck = checkGitSafety({ command: foundCmd.command, cwd });
-      if (gitCheck) {
-        logDecision({
-          agent: "codex",
-          hook: "PreToolUse",
-          tool: "Bash",
-          gitSafety: true,
-          decision: gitCheck.decision,
-          reason: gitCheck.reason,
-          hook_ms: Date.now() - hookStarted,
-        });
-        if (gitCheck.decision === "deny" || gitCheck.decision === "ask") {
-          return emit({
-            hookSpecificOutput: {
-              hookEventName: "PreToolUse",
-              permissionDecision: gitCheck.decision,
-              permissionDecisionReason: gitCheck.reason,
-            },
-          });
-        }
-      }
-    }
-  }
-
-  let verdict = { decision: ALLOW, reason: "not guarded", by: "code" };
-  if (GUARDED_TOOLS.has(toolName)) {
-    verdict = await guard({
-      toolName,
-      input,
-      cwd,
-      task,
-      recentCalls,
-      recentUserActions,
-      userCommands,
-      observed,
-      writtenDirs,
-    });
-  }
-  const guardMs = Date.now() - started;
-  const logVerdict = (extra = {}) => logDecision({
+  const verdict = await judge({
     agent: "codex",
-    hook: "PreToolUse",
-    tool: toolName,
-    decision: verdict.decision,
-    by: verdict.by,
-    reason: verdict.reason,
-    signals: verdict.signals,
-    probabilities: verdict.probabilities,
-    // `ms` keeps its historical meaning: time after transcript/task parsing.
-    ms: guardMs,
-    // `hook_ms` is recorded at the final branch so it covers the complete
-    // PreToolUse path, including transcript parsing and command rewriting.
-    hook_ms: Date.now() - hookStarted,
-    cost_usd: verdict.cost,
-    ...extra,
+    toolName,
+    input,
+    cwd,
+    command: toolName === "Bash" ? readCommand(input)?.command : undefined,
+    guarded: GUARDED_TOOLS.has(toolName),
+    transcript,
+    hookStarted,
   });
+  const logVerdict = verdict.log;
 
   if (verdict.decision === DENY || verdict.decision === ASK) {
     logVerdict();
@@ -393,14 +323,7 @@ async function main() {
 
 // Only run the dispatcher when this file is the entry point, so the tests
 // can import readCommand/writeCommand without the hook reading stdin.
-// Compared through realpath because the installer may register a symlink.
-const runningAsHook = (() => {
-  try {
-    return Boolean(process.argv[1]) && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url));
-  } catch {
-    return false;
-  }
-})();
+const runningAsHook = isEntryPoint(import.meta.url);
 
 if (runningAsHook) {
   main().catch((err) => {

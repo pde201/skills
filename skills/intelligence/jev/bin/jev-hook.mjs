@@ -11,7 +11,7 @@
 //  session carries on exactly as if these hooks were not installed.
 // ──────────────────────────────────────────────────────────────────────
 
-import { guard, ALLOW, ASK, DENY } from "../lib/guard.mjs";
+import { judge, readStdin, emit, nothing, ASK, DENY } from "../lib/hook-core.mjs";
 import { shouldWrap, rewrite } from "../lib/wrap.mjs";
 import { slim } from "../lib/slim.mjs";
 import { haveKey } from "../lib/client.mjs";
@@ -19,7 +19,6 @@ import { buildBrief, consumeBrief } from "../lib/carryforward.mjs";
 import {
   checkGoalDriftAndThrashing,
   triageToolError,
-  checkGitSafety,
 } from "../lib/supervision.mjs";
 import { createTranscriptSnapshot, transcriptContext } from "../lib/transcript.mjs";
 import { logDecision } from "../lib/log.mjs";
@@ -39,83 +38,32 @@ function callSummary(toolName, input) {
   return typeof path === "string" ? path : undefined;
 }
 
-async function readStdin() {
-  const chunks = [];
-  for await (const chunk of process.stdin) chunks.push(chunk);
-  const raw = Buffer.concat(chunks).toString("utf8").trim();
-  return raw ? JSON.parse(raw) : {};
-}
-
-const emit = (payload) => {
-  if (payload) process.stdout.write(JSON.stringify(payload));
-  process.exit(0);
-};
-
-const nothing = () => process.exit(0);
-
 // ── PreToolUse ───────────────────────────────────────────────────────
 
 async function preToolUse(event) {
   const { tool_name: toolName, tool_input: input, cwd, transcript_path: transcriptPath } = event;
   const hookStarted = Date.now();
   const transcript = transcriptContext(createTranscriptSnapshot(transcriptPath));
-  const { snapshot: transcriptSnapshot, task, recentCalls, recentUserActions, userCommands, observed, writtenDirs } = transcript;
-  const started = Date.now();
+  const { snapshot: transcriptSnapshot, task } = transcript;
 
-  // Git safety check on commits and pushes
-  if (config.gitSafety && toolName === "Bash" && typeof input?.command === "string") {
-    const gitCheck = checkGitSafety({ command: input.command, cwd });
-    if (gitCheck) {
-      logDecision({ hook: "PreToolUse", tool: "Bash", gitSafety: true, ...gitCheck, hook_ms: Date.now() - hookStarted });
-      if (gitCheck.decision === "deny" || gitCheck.decision === "ask") {
-        return emit({
-          hookSpecificOutput: {
-            hookEventName: "PreToolUse",
-            permissionDecision: gitCheck.decision,
-            permissionDecisionReason: gitCheck.reason,
-          },
-        });
-      }
-    }
-  }
-
-  let verdict = { decision: ALLOW, reason: "not guarded", by: "code" };
-  if (GUARDED_TOOLS.has(toolName)) {
-    verdict = await guard({
-      toolName,
-      input,
-      cwd,
-      task,
-      recentCalls,
-      recentUserActions,
-      userCommands,
-      observed,
-      writtenDirs,
-    });
-  }
-  const guardMs = Date.now() - started;
-  const logVerdict = (extra = {}) => logDecision({
-    hook: "PreToolUse",
-    tool: toolName,
+  const verdict = await judge({
+    toolName,
+    input,
+    cwd,
+    command: toolName === "Bash" ? input?.command : undefined,
+    guarded: GUARDED_TOOLS.has(toolName),
+    transcript,
+    hookStarted,
     // Enough to tie a decision back to its call and the request in force,
     // without a transcript: the log is otherwise unauditable after the fact.
-    session_id: event.session_id,
-    cwd,
-    call: callSummary(toolName, input),
-    task_hash: task ? createHash("sha256").update(task).digest("hex").slice(0, 12) : undefined,
-    decision: verdict.decision,
-    by: verdict.by,
-    reason: verdict.reason,
-    signals: verdict.signals,
-    probabilities: verdict.probabilities,
-    // `ms` keeps its historical meaning: time after transcript/task parsing.
-    ms: guardMs,
-    // `hook_ms` is recorded at the final branch so it covers the complete
-    // PreToolUse path, including transcript parsing, supervision, and rewrite.
-    hook_ms: Date.now() - hookStarted,
-    cost_usd: verdict.cost,
-    ...extra,
+    logFields: {
+      session_id: event.session_id,
+      cwd,
+      call: callSummary(toolName, input),
+      task_hash: task ? createHash("sha256").update(task).digest("hex").slice(0, 12) : undefined,
+    },
   });
+  const logVerdict = verdict.log;
 
   if (verdict.decision === DENY || verdict.decision === ASK) {
     logVerdict();

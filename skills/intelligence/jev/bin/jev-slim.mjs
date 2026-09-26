@@ -161,7 +161,7 @@ Environment:
   TYPESAFE_API_KEY      required; without it output passes through unchanged
   JEV_TASK              the task when no --task* flag is given
   JEV_HOOKS=0           disable entirely
-  JEV_SLIM_MIN_LINES    output shorter than this is never touched (default 60)
+  JEV_SLIM_MIN_LINES    output shorter than this is never touched (default 40)
   JEV_SLIM_FAILURES     opt-in local failed-stdout summary (default off)
   JEV_TIMEOUT_MS        per-request timeout (default 4000)
   JEV_BREAKER_FAILURES  consecutive provider failures before judgments are

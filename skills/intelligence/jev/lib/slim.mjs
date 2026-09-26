@@ -17,7 +17,7 @@ import { createPrivateTempDir, writePrivateFile } from "./privacy.mjs";
 // Choice criteria cap; the docs put the practical ceiling at 255 options.
 const MAX_BLOCKS = 200;
 // Keep state comfortably inside the 32k-token state budget.
-const MAX_STATE_CHARS = 90_000;
+const MAX_STATE_CHARS = 60_000;
 
 export const SHAPES = {
   test_results: "Output of a test run: passes, failures, assertions",
@@ -88,20 +88,30 @@ export function toBlocks(lines, maxBlocks = MAX_BLOCKS) {
   return blocks;
 }
 
+// The model ranks blocks from a gist; one wide line (a JSON log event, a stack frame
+// with a long classpath) needs no more than this to be recognised. The kept output is
+// always the original text, never the clipped view.
+const MAX_LINE_CHARS = 400;
+const clip = (line, max) => (line.length <= max ? line : `${line.slice(0, max)}…[+${line.length - max} chars]`);
+
 /** Render blocks for `state`, shrinking to previews if the full text is too large. */
-export function renderBlocks(blocks) {
-  const full = blocks.map((b) => `${b.id}|\n${b.lines.join("\n")}`).join("\n\n");
-  if (full.length <= MAX_STATE_CHARS) return { text: full, previewed: false };
+export function renderBlocks(blocks, { maxChars = MAX_STATE_CHARS, maxLineChars = MAX_LINE_CHARS } = {}) {
+  const full = blocks.map((b) => `${b.id}|\n${b.lines.map((l) => clip(l, maxLineChars)).join("\n")}`).join("\n\n");
+  if (full.length <= maxChars) return { text: full, previewed: false };
 
   const preview = blocks
     .map((b) => {
-      const head = b.lines.slice(0, 2).join("\n");
-      const tail = b.lines.length > 3 ? `\n…\n${b.lines[b.lines.length - 1]}` : "";
+      const head = b.lines.slice(0, 2).map((l) => clip(l, maxLineChars)).join("\n");
+      const tail = b.lines.length > 3 ? `\n…\n${clip(b.lines[b.lines.length - 1], maxLineChars)}` : "";
       return `${b.id}| (lines ${b.start}-${b.end})\n${head}${tail}`;
     })
     .join("\n\n");
-  return { text: preview.slice(0, MAX_STATE_CHARS), previewed: true };
+  return { text: preview.slice(0, maxChars), previewed: true };
 }
+
+// When dense text still overflows the model's token cap, try once more with half the
+// blocks, a third of the state and shorter lines.
+const RETRY_RENDER = { maxBlocks: 100, maxChars: 30_000, maxLineChars: 160 };
 
 // ── The judgments ────────────────────────────────────────────────────
 
@@ -267,7 +277,7 @@ export function summarizeFailedStdout(output, { minLines = MIN_FAILURE_LINES } =
 /**
  * @returns {Promise<{text: string, changed: boolean, reason: string, usage?: object, cost?: number}>}
  */
-export async function slim(output, { task = "", command = "", minLines = 60, model } = {}) {
+export async function slim(output, { task = "", command = "", minLines = 40, model } = {}) {
   const unchanged = (reason) => ({ text: output, changed: false, reason });
 
   if (!haveKey()) return unchanged("no api key");
@@ -277,22 +287,28 @@ export async function slim(output, { task = "", command = "", minLines = 60, mod
   const lines = cleaned.split("\n");
   if (lines.length < minLines) return unchanged(`under ${minLines} lines`);
 
-  const blocks = toBlocks(lines);
-  const rendered = renderBlocks(blocks);
+  let blocks = toBlocks(lines);
+  const ask = (render) => systemOne({
+    model,
+    state: {
+      task: task || "(not stated)",
+      command: command || "(not stated)",
+      output: render.text,
+    },
+    questions: slimQuestions(blocks, task, command),
+  });
 
   let res;
   try {
-    res = await systemOne({
-      model,
-      state: {
-        task: task || "(not stated)",
-        command: command || "(not stated)",
-        output: rendered.text,
-      },
-      questions: slimQuestions(blocks, task, command),
-    });
+    res = await ask(renderBlocks(blocks));
   } catch (err) {
-    return unchanged(`jev unavailable: ${err.message}`);
+    if (!/max_tokens_exceeded/.test(err.message)) return unchanged(`jev unavailable: ${err.message}`);
+    blocks = toBlocks(lines, RETRY_RENDER.maxBlocks);
+    try {
+      res = await ask(renderBlocks(blocks, RETRY_RENDER));
+    } catch (retryErr) {
+      return unchanged(`jev unavailable: ${retryErr.message}`);
+    }
   }
 
   const shape = pickChoice(res, "shape");

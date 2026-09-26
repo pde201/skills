@@ -205,8 +205,49 @@ const boundedText = (value, limit) => {
   return `${value.slice(0, head)}${marker}${value.slice(-Math.floor(available / 2))}`;
 };
 
+const QUESTION_TOOLS = new Set(["AskUserQuestion", "request_user_input"]);
+const MAX_ANSWER_CHARS = 600;
+
+/**
+ * Answers the user gave to the agent's own questions since their latest
+ * message. A structured question prompt returns as a tool result, so without
+ * this a choice like "label them security" never reaches the task text even
+ * though the user made it.
+ */
+export function userAnswersSinceLatestTurn(path) {
+  const entries = entriesFor(path);
+  let latest = -1;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    if (isUserTurn(entries[i]) && extractUserText(textOf(entries[i].message?.content ?? entries[i].content))) { latest = i; break; }
+  }
+  const questionIds = new Set();
+  const answers = [];
+  for (const entry of entries.slice(latest + 1)) {
+    const content = entry?.message?.content ?? entry?.content;
+    if (!Array.isArray(content)) continue;
+    for (const part of content) {
+      if (part?.type === "tool_use" && QUESTION_TOOLS.has(part.name)) questionIds.add(part.id);
+      if (part?.type === "tool_result" && questionIds.has(part.tool_use_id) && !part.is_error) {
+        const text = textOf(part.content).replace(/\s*You can now continue[\s\S]*$/i, "").trim();
+        if (text) answers.push(text);
+      }
+    }
+  }
+  return answers.length ? boundedText(answers.join("\n"), MAX_ANSWER_CHARS) : "";
+}
+
 /** The current request, with recent user directions when it amends ongoing work. */
-export function activeTaskContext(path, { latestPrompt = "", maxChars = 2000 } = {}) {
+export function activeTaskContext(path, options = {}) {
+  const base = baseTaskContext(path, options);
+  const maxChars = options.maxChars ?? 2000;
+  const answers = userAnswersSinceLatestTurn(path);
+  if (!base || !answers) return base;
+  const section = `\nUser answers to the agent's questions since then (user direction):\n${answers}`;
+  const room = maxChars - section.length;
+  return room >= 200 ? `${boundedText(base, room)}${section}` : base;
+}
+
+function baseTaskContext(path, { latestPrompt = "", maxChars = 2000 } = {}) {
   const entries = entriesFor(path);
   const turns = [];
   let latestEntryIndex = -1;
@@ -306,13 +347,19 @@ function parseToolCalls(entries) {
     if (!callsById.has(call.id)) callsById.set(call.id, call);
   };
 
+  // A human turn between a failed call and its retry is new direction: the
+  // user saw the failure and answered it ("create the label and continue").
+  // Calls are stamped with the human turn they followed so a retry after that
+  // turn is not judged a blind repeat.
+  let humanTurns = 0;
   for (const entry of entries) {
+    if (isUserTurn(entry) && extractUserText(textOf(entry.message?.content ?? entry.content))) humanTurns++;
     // Claude Code / Codex format
     const content = entry?.message?.content ?? entry?.content;
     if (Array.isArray(content)) {
       for (const part of content) {
         if (part?.type === "tool_use") {
-          addCall({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), paths: temporaryPaths(part.input), signature: callSignature(part.name, part.input), failed: false, id: part.id });
+          addCall({ tool: part.name, input: summarizeInput(part.input), detail: summarizeDetail(part.input), paths: temporaryPaths(part.input), signature: callSignature(part.name, part.input), failed: false, id: part.id, turn: humanTurns });
         } else if (part?.type === "tool_result") {
           const call = callsById.get(part.tool_use_id);
           if (call) {
@@ -329,7 +376,7 @@ function parseToolCalls(entries) {
         const id = call.id ?? String(entry.step_index ?? Math.random());
         const failed = Boolean(entry?.status === "ERROR" || call?.status === "ERROR" || call?.is_error || entry?.is_error);
         const args = call.args ?? call.input;
-        addCall({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), paths: temporaryPaths(args), signature: callSignature(call.name, args), failed, id });
+        addCall({ tool: call.name, input: summarizeInput(args), detail: summarizeDetail(args), paths: temporaryPaths(args), signature: callSignature(call.name, args), failed, id, turn: humanTurns });
       }
     } else if (entry?.source === "MODEL" && entry?.type === "GENERIC" && calls.length > 0) {
       const lastCall = calls[calls.length - 1];
@@ -338,6 +385,10 @@ function parseToolCalls(entries) {
         lastCall.result = (typeof entry.content === "string" ? entry.content : "").slice(0, 300);
       }
     }
+  }
+  for (const call of calls) {
+    call.beforeUserTurn = call.turn < humanTurns;
+    delete call.turn;
   }
   return calls;
 }

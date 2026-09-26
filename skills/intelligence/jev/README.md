@@ -12,7 +12,10 @@ for installation, troubleshooting, data handling, and evaluation.
 - `bin/jev-hook*.mjs` translates each host's events and verdicts.
 - `lib/guard.mjs` runs deterministic checks before model hazard scoring, and
   judges scope against the workspace (cwd, host folders, directories already
-  written to, temp, `JEV_WORKSPACE_ROOTS`) rather than the cwd alone.
+  written to, temp, `JEV_WORKSPACE_ROOTS`) rather than the cwd alone. Judgments
+  also see the repository's own remotes, the git-workflow lines of its
+  `AGENTS.md`/`CLAUDE.md` (or `JEV_POLICY_FILES`), and each part of a compound
+  shell command.
 - `lib/wrap.mjs` decides which shell commands are worth routing through the
   slimmer, skips short inspections and known secret-output commands,
   and builds the rewrite; `lib/config.mjs` holds every knob and default.

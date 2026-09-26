@@ -27,6 +27,7 @@ const wrapModule = await import("../lib/wrap.mjs");
 const { shouldWrap, rewrite, shellQuote } = wrapModule;
 const { deterministicCheck, guard, decide, guardQuestions, namesAPath, ALLOW, ASK, DENY } = await import("../lib/guard.mjs");
 const { harvest, composeBrief } = await import("../lib/carryforward.mjs");
+const { default: config } = await import("../lib/config.mjs");
 const fixtures = await import("./fixtures.mjs");
 
 // ── denoise ──────────────────────────────────────────────────────────
@@ -111,6 +112,27 @@ test("guard allows everything with no api key", async () => {
 // which is why the first case below reached a user before it was caught.
 
 const reach = (score) => ({ score, legend: {} });
+
+test("the soft band is off unless configured", () => {
+  assert.equal(decide({ intent_mismatch: 0.49 }, reach(1.5)).decision, ASK);
+});
+
+test("with the soft band on, a borderline non-destructive concern becomes advice", (t) => {
+  // Real asks from 2026-09-25/26: intent_mismatch 0.49 on a requested edit+push,
+  // wrong_scope 0.51 on a label the requested issues needed.
+  const configModule = config;
+  const previous = configModule.guardSoftUntil;
+  configModule.guardSoftUntil = 0.55;
+  t.after(() => { configModule.guardSoftUntil = previous; });
+  const soft = decide({ intent_mismatch: 0.49 }, reach(1.5));
+  assert.equal(soft.decision, ALLOW);
+  assert.equal(soft.advisory.intent_mismatch, 0.49);
+  assert.equal(decide({ intent_mismatch: 0.6 }, reach(1.5)).decision, ASK, "above the band still asks");
+  assert.equal(decide({ destructive_unrequested: 0.5 }, reach(1.5)).decision, ASK, "destruction is never softened");
+  assert.equal(decide({ intent_mismatch: 0.49, destructive_unrequested: 0.47 }, reach(1.5)).decision, ASK,
+    "one hard hazard keeps the whole call a question");
+  assert.equal(decide({ wrong_scope: 0.51 }, reach(3.1)).decision, DENY, "wide-reaching calls are never softened");
+});
 
 test("a guessed path in a read-only call is not worth interrupting for", () => {
   // `npm test -- src/api/client.test.ts` for the task "run the unit tests
@@ -397,6 +419,18 @@ function runHook(event, env = {}) {
   }).toString();
   return out.trim() ? JSON.parse(out) : null;
 }
+
+test("every PreToolUse log record names its session, cwd, call and task", () => {
+  const stateDir = mkdtempSync(join(tmpdir(), "jev-log-"));
+  runHook(
+    { hook_event_name: "PreToolUse", session_id: "sess-1", cwd: "/tmp", tool_name: "Bash", tool_input: { command: "git   status\n--short" } },
+    { JEV_STATE_DIR: stateDir, JEV_LOG: "" },
+  );
+  const [record] = readFileSync(join(stateDir, "jev-log.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(record.session_id, "sess-1");
+  assert.equal(record.cwd, "/tmp");
+  assert.equal(record.call, "git status --short");
+});
 
 test("the kill switch silences the hook entirely", () => {
   const result = runHook(
@@ -1239,6 +1273,90 @@ test("repeat failure is asked only when a recent tool call actually failed", () 
   assert.ok("repeat_failure" in guardQuestions(longCall, [], [
     { tool: "Bash", input: longCommand.slice(0, 300), signature: callSignature("Bash", longCall.input), failed: true },
   ]), "a long exact retry is still checked despite the shortened display input");
+});
+
+test("a retry the user answered with a new message is not a blind repeat", () => {
+  // Observed live: `gh label create …` was blocked, the user replied "create
+  // the label and continue", and the unchanged retry scored repeat_failure 0.94.
+  const call = { toolName: "Bash", input: { command: "gh label create security --repo owner/repo" } };
+  const failed = { tool: "Bash", input: call.input.command, failed: true };
+  assert.ok("repeat_failure" in guardQuestions(call, [], [failed]));
+  assert.ok(!("repeat_failure" in guardQuestions(call, [], [{ ...failed, beforeUserTurn: true }])));
+});
+
+test("shellSegments splits compound commands outside quotes only", async () => {
+  const { shellSegments } = await import("../lib/guard.mjs");
+  assert.deepEqual(
+    shellSegments("sed -i '' '9s/a/b/' docs/R.md && git add docs/R.md && git commit -m 'x && y'; git push origin HEAD:main"),
+    ["sed -i '' '9s/a/b/' docs/R.md", "git add docs/R.md", "git commit -m 'x && y'", "git push origin HEAD:main"],
+  );
+  assert.deepEqual(shellSegments("rg foo | head -5"), [], "a single pipeline is one step");
+  assert.deepEqual(shellSegments("make || echo \"fail; retry\""), ["make", "echo \"fail; retry\""]);
+});
+
+test("remoteSlug reduces remote URLs to owner/name without credentials", async () => {
+  const { remoteSlug } = await import("../lib/guard.mjs");
+  assert.equal(remoteSlug("https://github.com/owner/repo.git"), "owner/repo");
+  assert.equal(remoteSlug("git@github.com:owner/repo.git"), "owner/repo");
+  assert.equal(remoteSlug("https://x-token:secret@github.com/owner/repo"), "owner/repo");
+});
+
+test("policyExcerpt keeps only git-workflow lines, bounded", async () => {
+  const { policyExcerpt } = await import("../lib/guard.mjs");
+  const text = "# Rules\n- Push directly to `main`. Do not open pull requests.\n- Use tabs.\n- Commit only after tests pass.\n```\ngit push\n```";
+  assert.equal(policyExcerpt(text), "- Push directly to `main`. Do not open pull requests.\n- Commit only after tests pass.");
+  const many = Array.from({ length: 50 }, (_, i) => `- Push rule ${i}.`).join("\n");
+  assert.ok(policyExcerpt(many, 100).length <= 100, "bounded");
+  assert.match(policyExcerpt(many, 100), /^- Push rule 0\./, "keeps whole lines from the top");
+});
+
+test("projectContext reads the repository's remotes and policy", async () => {
+  const { projectContext } = await import("../lib/guard.mjs");
+  const repo = mkdtempSync(join(tmpdir(), "jev-proj-"));
+  execFileSync("git", ["init", "-q", repo]);
+  execFileSync("git", ["-C", repo, "remote", "add", "origin", "https://github.com/owner/repo.git"]);
+  writeFileSync(join(repo, "AGENTS.md"), "Style notes.\nThis repo pushes directly to main.\n");
+  const { remotes, policy } = projectContext(join(repo));
+  assert.deepEqual(remotes, ["origin owner/repo"]);
+  assert.equal(policy, "This repo pushes directly to main.");
+  assert.deepEqual(projectContext(mkdtempSync(join(tmpdir(), "jev-norepo-"))), { remotes: [], policy: "" });
+});
+
+test("answers to the agent's questions join the task until the user writes again", async () => {
+  const { activeTaskContext } = await import("../lib/transcript.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "jev-answers-"));
+  const path = join(dir, "t.jsonl");
+  const lines = [
+    { type: "user", message: { role: "user", content: "can we create github tickets for each issue?" } },
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "q", name: "AskUserQuestion", input: {} }] } },
+    { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "q", content: "User has answered your questions: \"How to file security items?\"=\"File normally, label security\". You can now continue with the user's answers in mind." }] } },
+  ];
+  writeFileSync(path, lines.map((l) => JSON.stringify(l)).join("\n"));
+  const task = activeTaskContext(path);
+  assert.match(task, /create github tickets/);
+  assert.match(task, /label security/);
+  assert.doesNotMatch(task, /You can now continue/);
+
+  writeFileSync(path, [...lines, { type: "user", message: { role: "user", content: "stop, new task: rename the file" } }]
+    .map((l) => JSON.stringify(l)).join("\n"));
+  assert.doesNotMatch(activeTaskContext(path), /label security/, "a new message supersedes earlier answers");
+});
+
+test("recentToolCalls marks calls made before the latest human turn", async () => {
+  const { recentToolCalls } = await import("../lib/transcript.mjs");
+  const dir = mkdtempSync(join(tmpdir(), "jev-turn-"));
+  const path = join(dir, "t.jsonl");
+  const lines = [
+    { type: "user", message: { role: "user", content: "file the issues" } },
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "a", name: "Bash", input: { command: "gh label create security" } }] } },
+    { type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: "a", is_error: true, content: "blocked" }] } },
+    { type: "user", message: { role: "user", content: "create the label and continue" } },
+    { type: "assistant", message: { role: "assistant", content: [{ type: "tool_use", id: "b", name: "Bash", input: { command: "gh label create security" } }] } },
+  ];
+  writeFileSync(path, lines.map((line) => JSON.stringify(line)).join("\n"));
+  const [before, after] = recentToolCalls(path);
+  assert.equal(before.beforeUserTurn, true, "the failed call precedes the user's answer");
+  assert.equal(after.beforeUserTurn, false, "a tool result is not a human turn");
 });
 
 // ── what counts as the workspace ─────────────────────────────────────

@@ -63,11 +63,21 @@ export const config = {
   guardAskAt: num("JEV_GUARD_ASK_AT", 0.45),
   guardDenyAt: num("JEV_GUARD_DENY_AT", 0.85),
   guardBlastRadiusBlock: num("JEV_GUARD_BLAST_RADIUS_BLOCK", 3),
+  // Opt-in soft band: asks on non-destructive hazards scoring below this, on
+  // calls that are not wide-reaching, go through with the concern passed to
+  // the model instead. Off by default (equal to the ask line) until a labeled
+  // set supports a value; 0.55 is the band the 2026-09-26 incidents sat in.
+  guardSoftUntil: num("JEV_GUARD_SOFT_UNTIL", num("JEV_GUARD_ASK_AT", 0.45)),
 
   // Extra directories that count as the workspace for `wrong_scope`, on top
   // of the cwd, the host's workspace folders, the directories this session
   // has already written to, and the temp directory. Comma-separated; `~` ok.
   workspaceRoots: list("JEV_WORKSPACE_ROOTS", []),
+
+  // Files whose git-workflow lines are shown to intent and scope judgments as
+  // the project's own rules. Comma-separated, relative to the repository
+  // root. Unset → the repository's AGENTS.md, then CLAUDE.md.
+  policyFiles: list("JEV_POLICY_FILES", []),
 
   // A Read changes nothing, so by default it gets the deterministic checks
   // only (existence, directory, credential-shaped path) and no model call.

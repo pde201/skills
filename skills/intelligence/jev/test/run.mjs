@@ -1907,6 +1907,35 @@ test("active task context carries a bounded assistant proposal for a short appro
   assert.doesNotMatch(task, /internal reasoning is not task context/);
 });
 
+test("a reply that picks numbered options carries the options it picks", () => {
+  // Logged: "1, 2 and 3" and "implement all" reached Jev as the whole task,
+  // with no referent; writes that carried them out asked at intent 0.53-0.66.
+  const dir = mkdtempSync(join(tmpdir(), "jev-selection-"));
+  const path = join(dir, "transcript.jsonl");
+  const write = (options, reply) => writeFileSync(path, [
+    { type: "user", message: { role: "user", content: "Review this checklist for our setup." } },
+    { type: "assistant", message: { role: "assistant", content: options } },
+    { type: "user", message: { role: "user", content: reply } },
+  ].map((entry) => JSON.stringify(entry)).join("\n"));
+  const menu = "Findings above. What would you like?\n\n1. Set cleanupPeriodDays and a nightly backup.\n2. Run the bounded top-10 audit.\n3. Build the local tables in SQLite.";
+
+  for (const reply of ["1, 2 and 3", "1", "all", "both", "do 2", "#1 and #3", "2 & 3", "1,2,3.", "all of them"]) {
+    write(menu, reply);
+    const task = activeTaskContext(path);
+    assert.match(task, /Assistant proposal before the latest user reply/, reply);
+    assert.match(task, /nightly backup/, reply);
+    assert.match(task, new RegExp(`Latest user direction:\\n${reply.replace(/[.*+?^${}()|[\]\\#]/g, "\\$&")}`), reply);
+  }
+
+  write("Items 1, 2 and 5 are the cheapest wins. Want me to take items 1, 2 and 5?", "implement all");
+  assert.match(activeTaskContext(path), /cheapest wins/, "a verb before all");
+
+  write(menu, "all tests pass now, thanks");
+  assert.equal(activeTaskContext(path), "all tests pass now, thanks", "a sentence that starts with all is not a selection");
+  write("The build finished; I saw 3 warnings.", "3");
+  assert.doesNotMatch(activeTaskContext(path), /Assistant proposal/, "a number with no options before it carries no proposal");
+});
+
 test("a tool result between a proposal and a short approval does not replace the proposal", () => {
   const dir = mkdtempSync(join(tmpdir(), "jev-approval-context-ambiguous-"));
   const path = join(dir, "transcript.jsonl");

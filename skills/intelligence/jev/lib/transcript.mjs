@@ -134,6 +134,12 @@ const SHORT_APPROVAL = /^(?:yes|yeah|yep|sure|okay|ok|agreed|approved|confirm(?:
 const APPROVAL_PREFIX = /^(?:yes|yeah|yep|sure|okay|ok|agreed|approved|confirm(?:ed)?|go ahead|do it|proceed|option\s+[a-z0-9]+)\b/i;
 const PROPOSAL_QUESTION = /\b(?:do you want me(?: to)?|would you like me(?: to)?|should i\b|shall i\b|can i\b|may i\b|want me to\b|which (?:option|one)\b|(?:needs?|requires?) your (?:ok|okay|approval)\b)\b/i;
 const PROPOSAL_ACTION = /\b(?:i['’]ll|i['’]d|i would|i can|i will|we can|we should|let me|switch|update|change|edit|add|remove|run|commit|push|regenerate|make|apply|implement|fix|keep|leave|park)\b/i;
+// A reply that picks from the assistant's numbered options: "1, 2 and 3",
+// "all", "both", "do 2", "implement all". Its meaning is the options it picks.
+const SELECTION = /^(?:(?:do|implement|take|apply|go with|run|build)\s+)?(?:all(?:\s+of\s+(?:them|these))?|both|#?\d{1,2}(?:\s*(?:,\s*and|,|and|&|\+)\s*#?\d{1,2})*)(?:,?\s*please)?[.!]?$/i;
+const OFFER_QUESTION = /\b(?:what would you like|which (?:of these|would you like|do you want))\b/i;
+const NUMBERED_OPTION = /^\s*(?:\d{1,2}[.)]|\|\s*\d{1,2}(?:\s*,\s*\d{1,2})*\s*\|)\s/gm;
+const isSelection = (text) => SELECTION.test(text.trim());
 const MAX_PROPOSAL_CHARS = 800;
 const REFERENCE_STOPWORDS = new Set([
   "after", "again", "agreed", "before", "change", "changes", "commit", "commits",
@@ -175,13 +181,18 @@ function assistantText(entry) {
   return stripInjectedBlocks(textOf(entry?.message?.content ?? entry?.content));
 }
 
+/** Does the assistant text offer choices a selection reply could pick from? */
+const offersChoices = (text) =>
+  PROPOSAL_QUESTION.test(text) || OFFER_QUESTION.test(text) || (text.match(NUMBERED_OPTION)?.length ?? 0) >= 2;
+
 /**
  * A short approval can answer an assistant's plan rather than restating the
  * user's task. Carry only the immediately preceding assistant text when it
- * contains an explicit approval question. Tool calls and tool results are
- * deliberately not considered proposal text.
+ * contains an explicit approval question — or, for a selection reply, when it
+ * offers choices. Tool calls and tool results are deliberately not
+ * considered proposal text.
  */
-function precedingAssistantProposal(entries, latestEntryIndex) {
+function precedingAssistantProposal(entries, latestEntryIndex, { selection = false } = {}) {
   if (latestEntryIndex < 0) return "";
   for (let index = latestEntryIndex - 1; index >= 0; index--) {
     const entry = entries[index];
@@ -191,6 +202,7 @@ function precedingAssistantProposal(entries, latestEntryIndex) {
     if (!isAssistantTurn(entry)) continue;
     const text = assistantText(entry);
     if (!text) continue;
+    if (selection) return offersChoices(text) ? text : "";
     return PROPOSAL_QUESTION.test(text) && PROPOSAL_ACTION.test(text) ? text : "";
   }
   return "";
@@ -266,10 +278,11 @@ function baseTaskContext(path, { latestPrompt = "", maxChars = 2000 } = {}) {
   }
   const latest = turns.at(-1);
   if (!latest) return "";
-  if (RESET_TASK.test(latest) || !FOLLOWUP.test(latest)) return boundedText(latest, maxChars);
+  const selection = isSelection(latest);
+  if (RESET_TASK.test(latest) || !(FOLLOWUP.test(latest) || selection)) return boundedText(latest, maxChars);
 
-  const proposal = shortApproval(latest)
-    ? precedingAssistantProposal(entries, latestEntryIndex)
+  const proposal = shortApproval(latest) || selection
+    ? precedingAssistantProposal(entries, latestEntryIndex, { selection })
     : "";
 
   const earlier = turns.slice(0, -1);

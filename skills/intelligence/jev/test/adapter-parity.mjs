@@ -51,7 +51,7 @@ const CASES = [
   { name: "catastrophic command", expect: "ask", ...shell("rm -rf /") },
   { name: "force push to main", expect: "ask", ...shell("git push --force origin main") },
   { name: "bloated output", expect: "rewrite", ...shell("npm test") },
-  { name: "short inspection", expect: "none", ...shell("git status") },
+  { name: "short inspection", expect: "none", logReason: "read-only shell command: deterministic checks only", ...shell("git status") },
   { name: "file write by redirect", expect: "none", ...shell("echo hi > a.txt") },
   {
     name: "read of a credential file",
@@ -96,6 +96,11 @@ for (const c of CASES) {
       if (c.expect === "ask" || c.expect === "deny") assert.equal(records[0].decision, c.expect, `${host} log decision`);
     }
     assert.equal(verdicts.codex.reason, verdicts.claude.reason, "codex reason matches claude");
+    // The log keeps the guard's reason; slimming records its own as wrap_reason.
+    const logReasons = Object.fromEntries(Object.entries(results).map(([host, r]) => [host, r.log.find((e) => e.hook === "PreToolUse")?.reason]));
+    assert.equal(logReasons.codex, logReasons.claude, "codex log reason matches claude");
+    assert.equal(logReasons.agy, logReasons.claude, "agy log reason matches claude");
+    if (c.logReason) assert.equal(logReasons.claude, c.logReason);
     assert.equal(verdicts.agy.reason, verdicts.claude.reason, "agy reason matches claude");
   });
 }

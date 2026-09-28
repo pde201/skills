@@ -13,6 +13,8 @@ Enforce process discipline, automate task checklists, and manage git/issue track
 Improve agent reasoning speeds, spend less of the context window, minimize planning latency, and support speculative branching.
 * **[jev](./skills/intelligence/jev/SKILL.md)**: Hooks for Claude Code, Codex and Antigravity that slim bloated tool output, guard risky tool calls, and carry a brief across compaction, using TypeSafe's Jev for the judgments.
   * **Install**: `npx --yes skills add pde201/skills --skill jev --global`, then run `install.sh` from the installed copy to register the hooks (see its [README](./skills/intelligence/jev/README.md))
+* **[browse](./skills/intelligence/browse/SKILL.md)**: Browser use for Claude Code: TypeSafe's Jev chooses each click and field through agent-browser, and anything that pays, sends, deletes or submits on an untrusted site comes back to the agent.
+  * **Install**: `npx --yes skills add pde201/skills --skill browse --global` together with jev, and `npm i -g agent-browser && agent-browser install` (see its [README](./skills/intelligence/browse/README.md))
 * **[ssd](./skills/intelligence/ssd/SKILL.md)**: One-step speculative branching to hide planning latency for slow steps in multi-step plans.
   * **Install**: `npx --yes skills add pde201/skills --skill ssd --global`
 

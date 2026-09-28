@@ -1,0 +1,28 @@
+{
+  "name": "@acuity-skills/browse",
+  "version": "1.0.0",
+  "description": "Agent skill: browser use for Claude Code, with TypeSafe's Jev choosing each action through agent-browser and consequential controls handed back to the agent.",
+  "files": [
+    "scripts/",
+    "docs/",
+    "CONTEXT.md",
+    "SKILL.md",
+    "README.md",
+    "install.sh"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "peerDependencies": {
+    "@acuity-skills/jev": ">=1.2.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pde201/skills.git"
+  },
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/candidates.test.mjs test/run.test.mjs test/driver.test.mjs",
+    "eval:live": "node evals/live.mjs"
+  }
+}

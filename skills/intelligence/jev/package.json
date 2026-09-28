@@ -19,7 +19,7 @@
     "evals/"
   ],
   "engines": {
-    "node": ">=22"
+    "node": ">=18"
   },
   "repository": {
     "type": "git",

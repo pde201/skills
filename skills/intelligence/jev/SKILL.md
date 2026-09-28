@@ -14,7 +14,7 @@ description: >-
 Jev supplies optional judgments for tool-call guarding, git safety, output
 slimming, supervision, completion checks, and compaction context. The host
 runs the hooks; this skill guides their operation. Paths below are relative to
-this skill directory. Hooks support Node 18+; tests and evals use Node 22+.
+this skill directory. Hooks, tests and evals run on Node 18+.
 Hook installers also require `jq`.
 
 ## Choose the task

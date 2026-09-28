@@ -111,7 +111,7 @@ node evals/runner.mjs \
   --format json > comparison.json
 ```
 
-The runner uses only Node built-ins. Hooks support Node 18+; tests and evals are exercised on Node 22+ (the package minimum). `npm run eval:self-test` checks the scorer; `npm run eval` requires separate observed traces to measure behavior.
+The runner uses only Node built-ins. Hooks, tests and evals run on Node 18+ (the package minimum). `npm run eval:self-test` checks the scorer; `npm run eval` requires separate observed traces to measure behavior.
 
 ## Trace contract
 

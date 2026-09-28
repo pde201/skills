@@ -50,8 +50,8 @@ leaves output intact; Jev is not an enforcement boundary.
 
 ## Validation
 
-Node 18+ runs the hooks (built-in `fetch`). Node 22+ and `jq` are required for
-the full offline suite. Run from this directory:
+Node 18+ (built-in `fetch`) runs the hooks, the offline suite and the evals;
+`jq` is also required for the full offline suite. Run from this directory:
 
 ```bash
 npm test

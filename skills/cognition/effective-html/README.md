@@ -83,7 +83,7 @@ The skill ships with a small validation helper:
 effective-html/scripts/check-html-artifact.py path/to/artifact.html
 ```
 
-It checks for common issues such as a missing title, missing viewport tag, external dependencies, missing landmarks, unlabeled controls, and stale placeholders.
+It checks for common issues such as a missing title, missing viewport tag, external dependencies (including `url()` and `@import` in CSS), missing landmarks, unlabeled controls, and stale placeholders. Its tests run with `python3 -m unittest discover -s tests` from this directory.
 
 ## What Gets Installed
 

@@ -1,6 +1,6 @@
 {
   "name": "@acuity-skills/ssd",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Agent skill: one-step speculative branching to hide planning latency in multi-step plans.",
   "files": [
     "references/",
@@ -15,5 +15,8 @@
     "type": "git",
     "url": "git+https://github.com/pde201/skills.git"
   },
-  "license": "MIT"
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/ssd-tracker.test.js"
+  }
 }

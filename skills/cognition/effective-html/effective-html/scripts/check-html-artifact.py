@@ -4,9 +4,16 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
+
+# url(...) and @import targets in CSS that load from another origin.
+CSS_REMOTE = re.compile(
+    r"""url\(\s*['"]?((?:https?:)?//[^'")\s]+)|@import\s+['"]((?:https?:)?//[^'"]+)""",
+    re.I,
+)
 
 
 class ArtifactParser(HTMLParser):
@@ -26,6 +33,9 @@ class ArtifactParser(HTMLParser):
         self._current_button_text: list[str] = []
         self.inputs: list[dict[str, str]] = []
         self.labels_for: set[str] = set()
+        self.labelled_inputs: set[int] = set()
+        self._label_depth = 0
+        self.css_text: list[str] = []
         
         # New Accessibility Fields
         self.images: list[dict[str, str]] = []
@@ -40,6 +50,9 @@ class ArtifactParser(HTMLParser):
         attr = {key.lower(): value or "" for key, value in attrs}
         self.stack.append(tag)
         
+        if attr.get("style"):
+            self.css_text.append(attr["style"])
+
         # Track IDs for uniqueness check
         element_id = attr.get("id")
         if element_id:
@@ -84,9 +97,13 @@ class ArtifactParser(HTMLParser):
             self._anchor_depth += 1
             self._current_anchor_text = []
         elif tag in {"input", "textarea", "select"}:
+            if self._label_depth or attr.get("aria-label") or attr.get("aria-labelledby"):
+                self.labelled_inputs.add(len(self.inputs))
             self.inputs.append(attr)
-        elif tag == "label" and attr.get("for"):
-            self.labels_for.add(attr["for"])
+        elif tag == "label":
+            self._label_depth += 1
+            if attr.get("for"):
+                self.labels_for.add(attr["for"])
 
     def handle_endtag(self, tag: str) -> None:
         if tag == "title":
@@ -95,6 +112,8 @@ class ArtifactParser(HTMLParser):
             self.button_text.append(" ".join("".join(self._current_button_text).split()))
             self._button_depth -= 1
             self._current_button_text = []
+        elif tag == "label" and self._label_depth:
+            self._label_depth -= 1
         elif tag == "a" and self._anchor_depth:
             self.anchor_text.append(" ".join("".join(self._current_anchor_text).split()))
             self._anchor_depth -= 1
@@ -103,6 +122,8 @@ class ArtifactParser(HTMLParser):
             self.stack.pop()
 
     def handle_data(self, data: str) -> None:
+        if self.stack and self.stack[-1] == "style":
+            self.css_text.append(data)
         if self.in_title:
             self.title_text.append(data)
         if self._button_depth:
@@ -131,6 +152,8 @@ def check(path: Path) -> tuple[list[str], list[str]]:
     if not parser.has_h1:
         warnings.append("No <h1> found.")
 
+    for match in CSS_REMOTE.finditer("\n".join(parser.css_text)):
+        parser.external_refs.append(match.group(1) or match.group(2))
     http_refs = [ref for ref in parser.external_refs if ref.startswith(("http://", "https://", "//"))]
     if http_refs:
         errors.append("External URL dependencies found: " + ", ".join(sorted(set(http_refs))))
@@ -166,7 +189,16 @@ def check(path: Path) -> tuple[list[str], list[str]]:
     if dup_ids:
         errors.append("Duplicate element IDs found (violates uniqueness): " + ", ".join(sorted(dup_ids)))
 
-    input_ids = {attrs.get("id", "") for attrs in parser.inputs if attrs.get("id")}
+    # Inputs a label wraps or aria-label names are labelled; hidden inputs and
+    # buttons carry their own text or need none.
+    self_labelled_types = {"hidden", "submit", "reset", "button", "image"}
+    input_ids = {
+        attrs["id"]
+        for index, attrs in enumerate(parser.inputs)
+        if attrs.get("id")
+        and index not in parser.labelled_inputs
+        and attrs.get("type", "").lower() not in self_labelled_types
+    }
     unlabeled = sorted(input_ids - parser.labels_for)
     if unlabeled:
         warnings.append("Inputs without matching <label for>: " + ", ".join(unlabeled))
@@ -180,7 +212,6 @@ def check(path: Path) -> tuple[list[str], list[str]]:
         warnings.append("Artifact is larger than 500 KB; check whether embedded data should be summarized.")
 
     # Impeccable Design Checks
-    import re
     # Check for pure white/black (ignoring print overrides)
     clean_style_text = re.sub(r'@media\s+print\s*\{[^}]*\}', '', text, flags=re.I)
     if re.search(r'color\s*:\s*(#000|#000000|black)\b', clean_style_text, re.I) or \
@@ -190,7 +221,7 @@ def check(path: Path) -> tuple[list[str], list[str]]:
     if re.search(r'border-(left|right)\s*:\s*([2-9]|\d{2,})px\b', text, re.I):
         warnings.append("Side-stripe border (accent line > 1px) detected. Avoid thick side-borders on cards or panels.")
     # Check for gradient text
-    if "background-clip" in text and "text" in text and "gradient" in text:
+    if re.search(r"background-clip\s*:\s*text\b", text, re.I) and "gradient" in text:
         warnings.append("Gradient text (background-clip: text) detected. Avoid decorative text gradients.")
     # Check for body line width constraint
     if parser.has_style and "max-width" not in text:

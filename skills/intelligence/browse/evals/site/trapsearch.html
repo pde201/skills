@@ -1,0 +1,9 @@
+<!doctype html><html><head><title>Hotel search</title></head><body>
+<h1>Find a room</h1>
+<!-- Looks like a GET search, but Enter submits through the default button,
+     whose formmethod makes it a POST. It must not be offered as a Site search. -->
+<form role="search" action="/results.html" method="get">
+  <label>Search rooms <input type="search" name="q"></label>
+  <button formmethod="post" formaction="/results.html">Go</button>
+</form>
+</body></html>

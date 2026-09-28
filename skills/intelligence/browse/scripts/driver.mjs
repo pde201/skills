@@ -61,6 +61,9 @@ export async function choose({ goal, page, history, options }) {
       redactOptions: false,
     });
   } catch (err) {
+    if (/max_tokens_exceeded/.test(err.message)) {
+      throw new DriverUnavailable("the page is too large for the Driver; read it yourself (agent-browser get text, or a scoped snapshot)");
+    }
     throw new DriverUnavailable(err.message);
   }
   const pick = client.pickChoiceStrict(res, "next");

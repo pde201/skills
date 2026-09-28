@@ -68,6 +68,8 @@ test("no key or a provider failure makes the Driver unavailable", async () => {
   process.env.TYPESAFE_API_KEY = "test-key";
   globalThis.fetch = async () => ({ ok: false, status: 503, async text() { return "down"; } });
   await assert.rejects(choose({ goal: "g", page: {}, history: [], options: OPTIONS }), DriverUnavailable);
+  globalThis.fetch = async () => ({ ok: false, status: 400, async text() { return '{"detail":{"error_type":"max_tokens_exceeded"}}'; } });
+  await assert.rejects(choose({ goal: "g", page: {}, history: [], options: OPTIONS }), /too large for the Driver/);
 });
 
 test("secrets come from the environment, never the command line", () => {

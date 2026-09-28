@@ -48,5 +48,6 @@ The live eval serves `evals/site` on `localhost` (trusted) and `0.0.0.0` (untrus
 
 - Page text can still steer which allowed Candidate Jev picks. The filter bounds what a steered choice can do; it does not stop the steering.
 - Consequential controls are recognised by label, form membership and link target. A control that does something lasting through script, with an innocent label and outside a form, is not caught.
+- A Site search is verified from the markup: the field's form, and the form's default button, submit by GET to the same origin. A page script that handles Enter itself, or an autocomplete suggestion, can still do something else; the domain allowlist bounds where that can go, and with `--profile` there is no allowlist.
 - Selects, uploads, drag and drop, iframes and canvas are not offered to the Driver; Claude handles them directly.
 - Claude Code only.

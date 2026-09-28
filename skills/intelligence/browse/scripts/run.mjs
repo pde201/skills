@@ -24,6 +24,19 @@ export const TYPE_FLOOR = Number(process.env.BROWSE_MIN_TYPE_CONFIDENCE || 0.75)
 export const MAX_STEPS = 30;
 const HISTORY = 10;
 const MAX_WAITS = 3;
+const MAX_REREADS = 2;
+// The Driver's state has a size limit, and a long diff page lists thousands
+// of controls (GitHub: 139 KB). The Candidates carry every control the
+// Driver may choose; this is context, so the top of the page is enough.
+const CONTROLS_CHARS = 12000;
+const capped = (text, max) => {
+  if (text.length <= max) return text;
+  const cut = text.lastIndexOf("\n", max);
+  const kept = text.slice(0, cut > 0 ? cut : max);
+  return `${kept}\n(${text.length - kept.length} more characters of controls not shown)`;
+};
+// agent-browser's messages when a ref no longer points at a live element.
+const RE_RENDERED = /element not found|unknown ref|click failed|detached|not attached|stale/i;
 
 const STATUS = { DONE: "done", BLOCKED: "blocked", NEEDS_INPUT: "needs_input", CONSEQUENTIAL: "consequential" };
 
@@ -187,6 +200,7 @@ export async function runBrowse(opts, { browser, choose, limit = 255, findTempla
   };
 
   let waits = 0;
+  let rereads = 0;
   const tried = new Set();
   let seen = reused;
   try {
@@ -217,7 +231,7 @@ export async function runBrowse(opts, { browser, choose, limit = 255, findTempla
     try {
       decision = await choose({
         goal,
-        page: { url: page.url, text: page.text, controls: page.snapshot },
+        page: { url: page.url, text: page.text, controls: capped(page.snapshot, CONTROLS_CHARS) },
         history: [...(meta.history ?? []), ...runHistory].slice(-HISTORY),
         options: built.options,
       });
@@ -308,6 +322,20 @@ export async function runBrowse(opts, { browser, choose, limit = 255, findTempla
       seen = browser.act(commands);
     } catch (err) {
       if (!(err instanceof BrowserError)) throw err;
+      // Pages that re-render as they load (GitHub's tab counts) can replace
+      // the chosen element under the click. agent-browser may report the
+      // click failed even when it landed, so do not guess: wait for the page
+      // to settle, read it, and let the Driver choose on what is there.
+      if (action.ref && RE_RENDERED.test(err.message) && rereads < MAX_REREADS) {
+        rereads++;
+        record(`uncertain: the element was re-rendered (${err.message})`);
+        try {
+          seen = browser.act([["wait", "--load", "load"]]);
+        } catch (readErr) {
+          return handback("error", `could not read the page: ${readErr.message}`);
+        }
+        continue;
+      }
       record(`failed: ${err.message}`);
       return handback("error", `${label} failed: ${err.message}`);
     }

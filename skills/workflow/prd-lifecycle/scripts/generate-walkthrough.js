@@ -11,38 +11,74 @@ if (!fs.existsSync(mdPath)) {
 
 const md = fs.readFileSync(mdPath, 'utf8');
 
-// Basic markdown-to-html parser
-let html = md
+const escapeHtml = text => text
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
   .replace(/>/g, '&gt;')
-  // Fenced code blocks
-  .replace(/```(\w+)?\n([\s\S]*?)```/g, (match, lang, code) => {
-    return `<pre><code>${code.trim()}</code></pre>`;
-  })
-  // Inline code
-  .replace(/`([^`]+)`/g, '<code>$1</code>')
-  // Headers
-  .replace(/^# (.*?)$/gm, '<h1>$1</h1>')
-  .replace(/^## (.*?)$/gm, '<h2>$1</h2>')
-  .replace(/^### (.*?)$/gm, '<h3>$1</h3>')
-  // Bold
-  .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-  // Lists
-  .replace(/^- (.*?)$/gm, '<li>$1</li>')
-  // Wrap list items
-  .replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>')
-  // Paragraphs (split by double newlines)
-  .split(/\n{2,}/)
-  .map(para => {
-    if (para.startsWith('<h') || para.startsWith('<pre') || para.startsWith('<ul') || para.startsWith('<hr')) {
-      return para;
+  .replace(/"/g, '&quot;');
+
+// Inline markup on already-escaped text; code spans are protected first.
+function inline(text) {
+  const spans = [];
+  return escapeHtml(text)
+    .replace(/`([^`]+)`/g, (_, code) => `\u0000${spans.push(code) - 1}\u0000`)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+|[^\s):]+)\)/g, '<a href="$2">$1</a>')
+    .replace(/\u0000(\d+)\u0000/g, (_, i) => `<code>${spans[i]}</code>`);
+}
+
+// Line-based Markdown subset: headings, fenced code, lists, rules, paragraphs.
+function render(source) {
+  const out = [];
+  const lines = source.replace(/\r\n?/g, '\n').split('\n');
+  let para = [];
+  let list = null;
+
+  const flushPara = () => {
+    if (para.length) out.push(`<p>${inline(para.join(' '))}</p>`);
+    para = [];
+  };
+  const flushList = () => {
+    if (list) out.push(`<${list.tag}>${list.items.map(item => `<li>${inline(item)}</li>`).join('')}</${list.tag}>`);
+    list = null;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    let match;
+    if (/^\s*```/.test(line)) {
+      flushPara(); flushList();
+      const code = [];
+      while (++i < lines.length && !/^\s*```/.test(lines[i])) code.push(lines[i]);
+      out.push(`<pre><code>${escapeHtml(code.join('\n'))}</code></pre>`);
+    } else if ((match = line.match(/^(#{1,6})\s+(.*)$/))) {
+      flushPara(); flushList();
+      out.push(`<h${match[1].length}>${inline(match[2])}</h${match[1].length}>`);
+    } else if (/^\s*([-*_])(\s*\1){2,}\s*$/.test(line)) {
+      flushPara(); flushList();
+      out.push('<hr>');
+    } else if ((match = line.match(/^\s*(?:([-*+])|\d+[.)])\s+(.*)$/))) {
+      flushPara();
+      const tag = match[1] ? 'ul' : 'ol';
+      if (list && list.tag !== tag) flushList();
+      if (!list) list = { tag, items: [] };
+      list.items.push(match[2]);
+    } else if (!line.trim()) {
+      flushPara(); flushList();
+    } else if (list && /^\s+\S/.test(line)) {
+      list.items[list.items.length - 1] += ` ${line.trim()}`;
+    } else {
+      flushList();
+      para.push(line.trim());
     }
-    return `<p>${para.replace(/\n/g, ' ')}</p>`;
-  })
-  .join('\n')
-  // Horizontal rules
-  .replace(/^---$/gm, '<hr>');
+  }
+  flushPara(); flushList();
+  return out.join('\n');
+}
+
+const html = render(md);
+const heading = md.match(/^#\s+(.*)$/m);
+const title = escapeHtml(heading ? heading[1].replace(/[`*]/g, '') : 'Walkthrough Report');
 
 // Wrap in responsive layout template
 const template = `<!doctype html>
@@ -50,7 +86,7 @@ const template = `<!doctype html>
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Walkthrough Report</title>
+  <title>${title}</title>
   <style>
     :root {
       --bg: oklch(0.98 0.006 82.5);
@@ -97,6 +133,8 @@ const template = `<!doctype html>
       margin: 0 0 20px;
     }
     pre code { background: none; padding: 0; }
+    ol { margin: 0 0 20px; padding-left: 24px; }
+    a { color: var(--accent); }
     hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }
   </style>
 </head>
@@ -107,5 +145,6 @@ const template = `<!doctype html>
 </body>
 </html>`;
 
+fs.mkdirSync(path.dirname(htmlPath), { recursive: true });
 fs.writeFileSync(htmlPath, template);
 console.log(`✅ Successfully generated HTML walkthrough at ${htmlPath}`);

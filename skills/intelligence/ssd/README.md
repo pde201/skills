@@ -81,3 +81,11 @@ Use $ssd to decide whether speculative branching is worthwhile for this multi-st
 - The skill is advisory. The executor remains authoritative for real workspace state and verification.
 - The skill deliberately limits speculation to one step of lookahead.
 - `npx skills add pde201/skills --list` lists this skill as `ssd`.
+
+## Tests
+
+```bash
+npm test
+```
+
+Covers `scripts/ssd-tracker.js`: logging, input validation, the unreadable-cache guard and each stop rule.

@@ -31,6 +31,9 @@ jobs:
       - name: prd-lifecycle
         working-directory: skills/workflow/prd-lifecycle
         run: npm test
+      - name: ssd tracker
+        working-directory: skills/intelligence/ssd
+        run: npm test
 
   skills:
     name: Skill metadata and samples
@@ -43,6 +46,9 @@ jobs:
       - run: pip install pyyaml
       - name: SKILL.md frontmatter and install instructions
         run: python .github/scripts/check-skills.py
+      - name: effective-html checker tests
+        working-directory: skills/cognition/effective-html
+        run: python -m unittest discover -s tests -v
       - name: effective-html samples are up to date
         working-directory: skills/cognition/effective-html
         run: python samples/build-samples.py --check

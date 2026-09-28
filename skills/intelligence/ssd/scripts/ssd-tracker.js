@@ -49,11 +49,18 @@ function readCache() {
   if (!fs.existsSync(cacheFile)) {
     return { rounds: [] };
   }
+  let data;
   try {
-    return JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
+    data = JSON.parse(fs.readFileSync(cacheFile, 'utf8'));
   } catch (e) {
-    return { rounds: [] };
+    data = null;
   }
+  // Never start over on an unreadable cache: the next write would erase it.
+  if (!data || !Array.isArray(data.rounds)) {
+    console.error(`❌ Error: ${cacheFile} is not a valid tracker cache. Fix or move it; nothing was changed.`);
+    process.exit(1);
+  }
+  return data;
 }
 
 function writeCache(data) {
@@ -79,6 +86,15 @@ if (command === 'log') {
   const validStatuses = ['cache_hit', 'cache_miss', 'partial_branch_reuse', 'no_speculation'];
   if (!validStatuses.includes(status)) {
     console.error(`❌ Error: Invalid status "${status}". Must be one of: ${validStatuses.join(', ')}`);
+    process.exit(1);
+  }
+
+  if (!/^\d+$/.test(primaryMs) || !/^\d+$/.test(executorMs)) {
+    console.error('❌ Error: --primary-ms and --executor-ms must be whole numbers of milliseconds.');
+    process.exit(1);
+  }
+  if (reuse !== undefined && !(/^\d*\.?\d+$/.test(reuse) && parseFloat(reuse) <= 1)) {
+    console.error('❌ Error: --reuse must be a ratio from 0 to 1.');
     process.exit(1);
   }
 

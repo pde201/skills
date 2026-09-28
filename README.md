@@ -39,6 +39,6 @@ git clone https://github.com/pde201/skills.git
 ./skills/install.sh prd-lifecycle claude    # or codex, or agents (the default); --force replaces an existing install
 ```
 
-`npx github:pde201/skills/...` does not work: npm cannot install a package from a subdirectory of a git repository.
+Installing with `npx` and a `github:` path into this repo does not work: npm cannot install a package from a subdirectory of a git repository.
 
 Restart your agent after installation to discover the new skill.

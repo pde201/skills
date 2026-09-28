@@ -1,6 +1,6 @@
 {
   "name": "@acuity-skills/jev",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Install the jev agent skill for Codex, Claude Code, Antigravity, or another skills directory.",
   "bin": {
     "acuity-jev": "bin/install.js"

@@ -15,7 +15,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # 18 is the documented minimum for jev and prd-lifecycle.
+        # 18 is the documented minimum for jev, browse and prd-lifecycle.
         node: [18, 22]
     steps:
       - uses: actions/checkout@v7
@@ -30,6 +30,9 @@ jobs:
         run: npm run eval:self-test
       - name: prd-lifecycle
         working-directory: skills/workflow/prd-lifecycle
+        run: npm test
+      - name: browse offline suite
+        working-directory: skills/intelligence/browse
         run: npm test
       - name: ssd tracker
         working-directory: skills/intelligence/ssd
@@ -83,6 +86,11 @@ jobs:
           if ./install.sh jev --dest "$dest" 2>/dev/null; then
             echo "jev should be refused by the root installer"; exit 1
           fi
+      - name: browse installer
+        run: |
+          skills/intelligence/browse/install.sh --dest "$RUNNER_TEMP/browse-sh"
+          test -f "$RUNNER_TEMP/browse-sh/browse/SKILL.md"
+          test -x "$RUNNER_TEMP/browse-sh/browse/scripts/browse.mjs"
       - name: jev copy installers
         run: |
           skills/intelligence/jev/install-skill.sh --dest "$RUNNER_TEMP/jev-sh"

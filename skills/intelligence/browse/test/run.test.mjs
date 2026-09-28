@@ -37,7 +37,7 @@ function fakeBrowser({ changeOnce = false, failClick = false } = {}) {
   let changed = false;
   const current = () => SITE[url];
   // Once the page changes (an element appears), it stays changed.
-  const read = () => ({ snapshot: current().snapshot + (changed ? `\n- button "Ad" [ref=e99]` : ""), text: current().text, url });
+  const read = () => ({ snapshot: current().snapshot + (changed ? `\n- button "Ad" [ref=e99]` : ""), text: current().text, url, openSearchHref: current().openSearch ?? null });
   return {
     log,
     close: () => log.push(["close"]),
@@ -51,14 +51,18 @@ function fakeBrowser({ changeOnce = false, failClick = false } = {}) {
     attrs: (buttons, fields) => ({
       submits: new Set(buttons.filter((r) => current().submits?.includes(r))),
       types: new Map(fields.map((r) => [r, current().types?.[r] ?? null])),
+      searchable: new Set(fields.filter((r) => current().searchable?.includes(r))),
     }),
-    act(command) {
-      const [verb, target, text] = command;
-      if (verb === "click" && failClick) throw new BrowserError("Unknown ref");
-      const ref = target?.replace(/^@/, "");
-      log.push(verb === "fill" ? ["fill", ref, text] : [verb, ref ?? target]);
-      if (verb === "click" && current().go[ref]) url = current().go[ref];
-      if (verb === "open") url = target;
+    act(commands) {
+      log.push(["act", commands.length]);
+      for (const [verb, target, text] of commands) {
+        if (verb === "click" && failClick) throw new BrowserError("Unknown ref");
+        const ref = target?.replace(/^@/, "");
+        log.push(verb === "fill" ? ["fill", ref, text] : [verb, ref ?? target]);
+        if (verb === "click" && current().go[ref]) url = current().go[ref];
+        if (verb === "open") url = target;
+        if (verb === "press" && target === "Enter" && current().enter) url = current().enter(log);
+      }
       return read();
     },
   };
@@ -102,7 +106,7 @@ test("a trusted launch uses only the output cap; a strict one turns every guard 
   const flags = browser.log.find((e) => e[0] === "launch")[2];
   assert.deepEqual(flags.slice(0, 2), ["--max-output", "20000"]);
   assert.equal(flags[2], "--init-script");
-  assert.match(flags[3], /mark-submits\.js$/);
+  assert.match(flags[3], /mark-page\.js$/);
   assert.equal(flags.length, 4);
 
   const strict = launchFlags({ tier: "strict", allowOrigins: ["https://shop.example", "https://cdn.shop.example:8443"], policyPath: "/p.json" });
@@ -283,4 +287,46 @@ test("--reuse opens the URL in a running session launched the same way, and rela
 
   await runBrowse({ ...opts, url: "http://localhost:4000/" }, { browser, choose: scriptedDriver([["DONE", 0.9]]).choose });
   assert.equal(browser.log.filter((e) => e[0] === "launch").length, 3, "without --reuse, always fresh");
+});
+
+test("a Site search fills a marked search field and submits it in one call, at the typing floor", async () => {
+  SITE["https://wiki.example/"] = {
+    snapshot: `- searchbox "Search Wiki" [ref=e1]\n- button "Search" [ref=e2]`,
+    text: "Welcome",
+    submits: ["e2"],
+    types: { e1: "search" },
+    searchable: ["e1"],
+    enter: (log) => `https://wiki.example/results?q=${encodeURIComponent(log.findLast((e) => e[0] === "fill")[2])}`,
+    go: {},
+  };
+  SITE["https://wiki.example/results?q=pelican%20bicycle"] = { snapshot: `- link "Pelican" [ref=e1, url=https://wiki.example/Pelican]`, text: "Results", go: {} };
+  const values = [{ name: "query", text: "pelican bicycle", secret: false }, { name: "pw", text: "hunter2", secret: true }];
+
+  const low = await run({ url: "https://wiki.example/", values }, fakeBrowser(), scriptedDriver([['Search for value "query" in searchbox "Search Wiki" and open the results', TYPE_FLOOR - 0.01]]));
+  assert.equal(low.status, "low_confidence");
+
+  const browser = fakeBrowser();
+  const driver = scriptedDriver([['Search for value "query" in searchbox "Search Wiki" and open the results', 0.9], ["DONE", 0.9]]);
+  const result = await run({ url: "https://wiki.example/", values }, browser, driver);
+  assert.equal(result.status, "done");
+  assert.equal(result.url, "https://wiki.example/results?q=pelican%20bicycle");
+  assert.deepEqual(result.withheld, undefined);
+  assert.ok(browser.log.some((e) => e[0] === "act" && e[1] === 3), "fill, Enter and wait in one call");
+  assert.ok(!Object.values(driver.asked[0].options).some((l) => l.includes('"pw"')), "a secret is never a search");
+});
+
+test("a published search template on the same origin becomes a Site search", async () => {
+  SITE["https://code.example/"] = {
+    snapshot: `- button "Search or jump to" [ref=e1]`, text: "Home", openSearch: "/opensearch.xml", go: {},
+  };
+  SITE["https://code.example/search?q=is%3Apr%20author%3Ame&p="] = { snapshot: `- link "PR #1" [ref=e1, url=https://code.example/pr/1]`, text: "1 result", go: {} };
+  const findTemplate = async (href, pageUrl) => (new URL(href, pageUrl).href === "https://code.example/opensearch.xml" ? "https://code.example/search?q={searchTerms}&p={startPage?}" : null);
+  const browser = fakeBrowser();
+  const driver = scriptedDriver([['Search this site for value "query" and open the results', 0.9], ["DONE", 0.9]]);
+  const result = await runBrowse(
+    { session: "tmpl", goal: "find my PRs", url: "https://code.example/", values: [{ name: "query", text: "is:pr author:me", secret: false }] },
+    { browser, choose: driver.choose, findTemplate },
+  );
+  assert.equal(result.status, "done");
+  assert.equal(result.url, "https://code.example/search?q=is%3Apr%20author%3Ame&p=", "an optional parameter is left empty");
 });

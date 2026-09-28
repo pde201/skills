@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { parseSnapshot, buildCandidates, consequentialReason } from "../scripts/candidates.mjs";
 import { isTrusted, parseTrustedOrigins, originOf } from "../scripts/origins.mjs";
+import { parseTemplate, searchUrl, templateFinder } from "../scripts/opensearch.mjs";
 
 // Recorded from agent-browser 0.27 (`snapshot -i --urls`) on the test page
 // used for the live Runs.
@@ -117,4 +118,55 @@ test("trusted origins are localhost or listed exactly, never by wildcard", () =>
   assert.deepEqual(parsed.origins, ["https://my-app.vercel.app", "http://intranet:8080"]);
   assert.deepEqual(parsed.rejected, ["*.vercel.app", "example.com"]);
   assert.equal(originOf("about:blank"), null);
+});
+
+test("a marked search field offers a Site search; a combobox only when marked", () => {
+  const page = {
+    snapshot: `- searchbox "Search" [ref=e1]\n- combobox "Search with Duck" [ref=e2]\n- combobox "Rooms" [ref=e3]: 1\n- textbox "Name" [ref=e4]`,
+    origin: "https://duck.example",
+    submits: new Set(),
+    types: new Map([["e1", "search"]]),
+    searchable: new Set(["e1", "e2"]),
+  };
+  const values = [{ name: "query", secret: false }, { name: "pw", secret: true }];
+  const built = buildCandidates(page, { trusted: false, secretsAllowed: true, values });
+  const all = Object.values(built.options);
+  assert.ok(all.includes('Search for value "query" in searchbox "Search" and open the results'));
+  assert.ok(all.includes('Search for value "query" in combobox "Search with Duck" and open the results'));
+  assert.ok(!all.some((l) => l.includes('combobox "Rooms"')), "an unmarked combobox is a select");
+  assert.ok(!all.some((l) => l.startsWith('Type value "query"') && /Search/.test(l)), "a search field is only ever searched");
+  assert.ok(!all.some((l) => l.startsWith("Search") && l.includes('"pw"')));
+  assert.equal(built.options.ENTER, undefined, "a bare Enter stays trusted-only");
+});
+
+test("a usable search template offers one page-level Site search per ordinary value", () => {
+  const page = {
+    snapshot: `- link "Home" [ref=e1, url=https://code.example/]\n- button "Search or jump to" [ref=e2]`,
+    origin: "https://code.example", submits: new Set(), types: new Map(), siteSearch: true,
+  };
+  const built = buildCandidates(page, { trusted: false, secretsAllowed: true, values: [{ name: "query", secret: false }, { name: "pw", secret: true }] });
+  assert.equal(built.options.a0, 'Search this site for value "query" and open the results');
+  assert.ok(!Object.values(built.options).some((l) => l.includes('for value "pw"')));
+  // Opening the site's search box first measurably raises the Driver's
+  // confidence in the search itself (GitHub: 0.72-0.75 without, 0.88-0.90 with).
+  assert.ok(Object.values(built.options).includes('Click button "Search or jump to"'));
+});
+
+test("an OpenSearch template is used only as a GET on the page's own origin", async () => {
+  const github = `<OpenSearchDescription><Url type="text/html" method="get" template="https://github.com/search?q={searchTerms}&amp;ref=opensearch"/></OpenSearchDescription>`;
+  assert.equal(parseTemplate(github), "https://github.com/search?q={searchTerms}&ref=opensearch");
+  assert.equal(parseTemplate(`<Url type="application/x-suggestions+json" template="https://x/s?q={searchTerms}"/><Url type="text/html" method="post" template="https://x/p"/>`), null);
+
+  assert.equal(searchUrl("https://github.com/search?q={searchTerms}&ref=opensearch", "is:pr a&b", "https://github.com"), "https://github.com/search?q=is%3Apr%20a%26b&ref=opensearch");
+  assert.equal(searchUrl("https://evil.example/?q={searchTerms}", "x", "https://github.com"), null, "another origin");
+  assert.equal(searchUrl("https://github.com/?q={searchTerms}&page={startPage}", "x", "https://github.com"), null, "a required parameter it cannot fill");
+  assert.equal(searchUrl("https://github.com/?q={searchTerms}&page={startPage?}", "x", "https://github.com"), "https://github.com/?q=x&page=");
+
+  let fetched = 0;
+  const find = templateFinder(async () => { fetched++; return { ok: true, text: async () => github }; });
+  assert.equal(await find("/opensearch.xml", "https://github.com/"), "https://github.com/search?q={searchTerms}&ref=opensearch");
+  await find("/opensearch.xml", "https://github.com/other");
+  assert.equal(fetched, 1, "cached per description URL");
+  assert.equal(await find("https://evil.example/os.xml", "https://github.com/"), null, "a description on another origin is not fetched");
+  assert.equal(fetched, 1);
 });

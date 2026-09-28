@@ -15,6 +15,7 @@ import { originOf, isTrusted } from "./origins.mjs";
 import { buildCandidates, parseSnapshot, HANDBACK_CONTROLS } from "./candidates.mjs";
 import { launchFlags, STRICT_DENY, BrowserError } from "./agent-browser.mjs";
 import { DriverUnavailable } from "./driver.mjs";
+import { templateFinder, searchUrl } from "./opensearch.mjs";
 
 // TypeSafe: thresholds scale with risk. Typing puts the agent's text into
 // the page, so it needs more certainty than a click.
@@ -108,8 +109,9 @@ const round = (n) => Math.round(n * 100) / 100;
  * @param {object} deps.browser  from agentBrowser()
  * @param {Function} deps.choose from driver.mjs
  * @param {number} [deps.limit]  most options one question may carry
+ * @param {Function} [deps.findTemplate]  from opensearch.mjs templateFinder()
  */
-export async function runBrowse(opts, { browser, choose, limit = 255 }) {
+export async function runBrowse(opts, { browser, choose, limit = 255, findTemplate = templateFinder() }) {
   const { goal, session, values = [], trustedOrigins = [], profile, headed } = opts;
   const maxSteps = Math.min(Math.max(1, opts.maxSteps ?? 10), MAX_STEPS);
   const byName = new Map(values.map((v) => [v.name, v]));
@@ -150,7 +152,7 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
     // why it is opt-in: the default is a fresh, logged-out session.
     if (previous && sameLaunch(previous, meta)) {
       try {
-        reused = browser.act(["open", opts.url]);
+        reused = browser.act([["open", opts.url]]);
       } catch {
         reused = null; // the session is gone; launch a fresh one
       }
@@ -168,15 +170,20 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
     if (!meta) return handback("error", `no Run has opened session "${session}"; pass --url to start one`);
   }
 
-  // Adds what a snapshot does not say: the origin, and which buttons
-  // submit a form and which fields take passwords (one call, when needed).
-  const observe = (seen) => {
+  // Adds what a snapshot does not say: the origin, which buttons submit a
+  // form, which fields take passwords or run a Site search (one browser
+  // call, when needed), and the site's search template.
+  const observe = async (seen) => {
     const origin = originOf(seen.url);
     const trusted = isTrusted(origin, trustedOrigins);
     const elements = parseSnapshot(seen.snapshot);
     const buttons = trusted ? [] : elements.filter((e) => e.role === "button").map((e) => e.ref);
-    const fields = values.length ? elements.filter((e) => e.role === "textbox" || e.role === "searchbox").map((e) => e.ref) : [];
-    return { ...seen, origin, trusted, ...browser.attrs(buttons, fields) };
+    const fields = values.length
+      ? elements.filter((e) => ["textbox", "searchbox", "combobox"].includes(e.role)).map((e) => e.ref)
+      : [];
+    const template = values.some((v) => !v.secret) && seen.openSearchHref ? await findTemplate(seen.openSearchHref, seen.url) : null;
+    const searchTemplate = template && searchUrl(template, "x", origin) ? template : null;
+    return { ...seen, origin, trusted, searchTemplate, siteSearch: Boolean(searchTemplate), ...browser.attrs(buttons, fields) };
   };
 
   let waits = 0;
@@ -190,7 +197,7 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
 
   for (let step = 1; step <= maxSteps; step++) {
     try {
-      page = observe(seen);
+      page = await observe(seen);
     } catch (err) {
       return handback("error", `could not read the page: ${err.message}`);
     }
@@ -233,7 +240,8 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
     }
 
     const action = built.actions[choice] ?? { kind: choice };
-    const floor = action.kind === "type" ? TYPE_FLOOR : CLICK_FLOOR;
+    // Typing and a Site search both put the agent's text into the page.
+    const floor = ["type", "search", "sitesearch"].includes(action.kind) ? TYPE_FLOOR : CLICK_FLOOR;
     if (confidence < floor) {
       record("not taken: below the confidence floor");
       return handback("low_confidence", `${label} at ${round(confidence)} is below ${floor}`, withheld);
@@ -245,29 +253,42 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
       return handback("no_progress", `"${label}" was already tried on this same page`);
     }
 
-    let command;
+    let commands;
     if (choice === "WAIT") {
       if (++waits >= MAX_WAITS) {
         record("not taken: waited too often");
         return handback("no_progress", `the page was still loading after ${MAX_WAITS} waits`);
       }
-      command = ["wait", "1000"];
+      commands = [["wait", "1000"]];
     } else {
       waits = 0;
-      if (action.kind === "click") command = ["click", `@${action.ref}`];
-      else if (action.kind === "type") {
-        const value = byName.get(action.value);
+      const value = byName.get(action.value);
+      if ((action.kind === "search" || action.kind === "sitesearch") && value.secret) {
+        record("not taken: a secret value is never searched for");
+        return handback("needs_input", "a secret value may not be used for a search");
+      }
+      if (action.kind === "click") commands = [["click", `@${action.ref}`]];
+      else if (action.kind === "search") {
+        commands = [["fill", `@${action.ref}`, value.text], ["press", "Enter"], ["wait", "--load", "load"]];
+      } else if (action.kind === "sitesearch") {
+        const url = searchUrl(page.searchTemplate, value.text, page.origin);
+        if (!url) {
+          record("not taken: the search template does not stay on this origin");
+          return handback("error", "the site's search template could not be used for this value");
+        }
+        commands = [["open", url]];
+      } else if (action.kind === "type") {
         // buildCandidates already enforces this; checked again where the
         // text actually leaves, because this is the rule that matters most.
         if (value.secret && !(secretsAllowed && page.types.get(action.ref) === "password")) {
           record("not taken: secret value outside a password field on an allowed origin");
           return handback("needs_input", "a secret value may only be typed into a password field on the starting or a trusted origin");
         }
-        command = ["fill", `@${action.ref}`, value.text];
-      } else if (choice === "SCROLL_DOWN") command = ["scroll", "down", "600"];
-      else if (choice === "SCROLL_UP") command = ["scroll", "up", "600"];
-      else if (choice === "ESCAPE") command = ["press", "Escape"];
-      else if (choice === "ENTER") command = ["press", "Enter"];
+        commands = [["fill", `@${action.ref}`, value.text]];
+      } else if (choice === "SCROLL_DOWN") commands = [["scroll", "down", "600"]];
+      else if (choice === "SCROLL_UP") commands = [["scroll", "up", "600"]];
+      else if (choice === "ESCAPE") commands = [["press", "Escape"]];
+      else if (choice === "ENTER") commands = [["press", "Enter"]];
       else return handback("error", `unknown option ${choice}`);
     }
 
@@ -284,7 +305,7 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
           continue;
         }
       }
-      seen = browser.act(command);
+      seen = browser.act(commands);
     } catch (err) {
       if (!(err instanceof BrowserError)) throw err;
       record(`failed: ${err.message}`);

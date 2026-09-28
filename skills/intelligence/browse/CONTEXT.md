@@ -15,7 +15,7 @@ A browser action offered to the Driver for one step. Only what survives filterin
 _Avoid_: option, choice (those are the API's words)
 
 **Consequential control**:
-A page control whose effect lasts beyond the page, such as paying, sending, posting, deleting or signing out. On an untrusted origin, any control that submits a form or leads to another origin is one too, whatever its label. Never a Candidate on an untrusted origin.
+A page control whose effect lasts beyond the page, such as paying, sending, posting, deleting or signing out. On an untrusted origin, any control that submits a form or leads to another origin is one too, whatever its label — except a Site search. Never a Candidate on an untrusted origin.
 _Avoid_: dangerous button, risky action
 
 ## Runs
@@ -31,6 +31,10 @@ _Avoid_: exit, stop, stall
 **Named value**:
 Text the agent hands to a Run under a name, for the Driver to type into a field. The Driver sees only the name, never the text.
 _Avoid_: input, variable, slot
+
+**Site search**:
+A GET navigation to the current origin that runs the site's own search with a Named value, through a search form or the site's published search template. Not a Consequential control; never done with a Secret value.
+_Avoid_: search submit, query
 
 **Secret value**:
 A Named value the agent marks secret. It is only ever typed into a password field on the Run's starting origin or a Trusted origin.

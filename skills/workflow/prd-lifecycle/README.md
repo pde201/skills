@@ -12,11 +12,11 @@ With the [skills.sh](https://skills.sh) CLI (add `--agent claude-code` or `--age
 npx --yes skills add pde201/skills --skill prd-lifecycle --global --yes
 ```
 
-Or from a clone, with the skill's own installer (`agents|codex|claude`, default `agents`):
+Or from a clone, with the repository's installer (targets `agents`, `codex` or `claude`; default `agents`):
 
 ```bash
 git clone https://github.com/pde201/skills.git
-./skills/skills/workflow/prd-lifecycle/install.sh claude
+./skills/install.sh prd-lifecycle claude
 ```
 
 The installer also accepts `--dest DIR` for another skills directory and `--force` to replace an existing install; run it with `--help` for details.

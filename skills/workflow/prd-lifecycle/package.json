@@ -1,16 +1,11 @@
 {
   "name": "@acuity-skills/prd-lifecycle",
   "version": "1.1.0",
-  "description": "Install the prd-lifecycle agent skill: manage parent PRD and child implementation issue lifecycles with verification checks and walkthrough comments.",
-  "bin": {
-    "acuity-prd-lifecycle": "bin/install.js"
-  },
+  "description": "Agent skill: manage parent PRD and child implementation issue lifecycles on GitHub, with verification checks and walkthrough comments.",
   "files": [
-    "bin/",
     "scripts/",
     "SKILL.md",
-    "README.md",
-    "install.sh"
+    "README.md"
   ],
   "scripts": {
     "verify": "bash scripts/verify-prd-closing.sh"

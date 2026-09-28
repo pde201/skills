@@ -33,10 +33,10 @@ To see every skill in this repo:
 npx --yes skills add pde201/skills --list
 ```
 
-Without the skills CLI, clone the repo and run a skill's own installer:
+Without the skills CLI, clone the repo and run its installer with the skill's name (`./install.sh --list` shows them; jev has its own, see its README):
 ```bash
 git clone https://github.com/pde201/skills.git
-./skills/skills/workflow/prd-lifecycle/install.sh claude    # or codex; --force replaces an existing install
+./skills/install.sh prd-lifecycle claude    # or codex, or agents (the default); --force replaces an existing install
 ```
 
 `npx github:pde201/skills/...` does not work: npm cannot install a package from a subdirectory of a git repository.

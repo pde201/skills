@@ -8,9 +8,12 @@ const path = require("path");
 function usage() {
   console.log(`Install the Acuity prd-lifecycle skill.
 
-Usage:
-  npx --yes github:pde201/skills/skills/workflow/prd-lifecycle [agents|codex|claude] [--force]
-  npx --yes github:pde201/skills/skills/workflow/prd-lifecycle --dest /path/to/skills-dir [--force]
+Usage (npm's npx cannot install from a git subdirectory, so fetch via a
+sparse clone instead of "npx github:..."):
+  git clone --filter=blob:none --sparse --depth 1 https://github.com/pde201/skills.git /tmp/prd-lifecycle-install
+  git -C /tmp/prd-lifecycle-install sparse-checkout set skills/workflow/prd-lifecycle
+  node /tmp/prd-lifecycle-install/skills/workflow/prd-lifecycle/bin/install.js [agents|codex|claude] [--force]
+  node /tmp/prd-lifecycle-install/skills/workflow/prd-lifecycle/bin/install.js --dest /path/to/skills-dir [--force]
 
 Targets:
   agents  Install to \${AGENTS_HOME:-$HOME/.agents}/skills (default)
@@ -103,7 +106,7 @@ function main() {
     console.error(`error: ${destDir} already exists
 
 Run with --force to replace it:
-  npx --yes github:pde201/skills/skills/workflow/prd-lifecycle ${options.target} --force`);
+  node ${__filename} ${options.destBase ? `--dest "${options.destBase}"` : options.target} --force`);
     process.exit(1);
   }
 

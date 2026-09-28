@@ -56,15 +56,14 @@ With the [skills.sh](https://skills.sh) CLI, which installs for your detected ag
 npx --yes skills add pde201/skills --skill effective-html --global --yes
 ```
 
-Or with this package's own installer:
+Or from a clone, with the skill's own installer (`agents|codex|claude`, default `agents`):
 
 ```bash
-npx --yes github:pde201/skills/skills/cognition/effective-html          # ${AGENTS_HOME:-$HOME/.agents}/skills
-npx --yes github:pde201/skills/skills/cognition/effective-html codex    # ${CODEX_HOME:-$HOME/.codex}/skills
-npx --yes github:pde201/skills/skills/cognition/effective-html claude   # ${CLAUDE_HOME:-$HOME/.claude}/skills
+git clone https://github.com/pde201/skills.git
+./skills/skills/cognition/effective-html/install.sh claude
 ```
 
-From a clone, `./install.sh` takes the same targets. Both installers accept `--dest DIR` for another skills directory and `--force` to replace an existing install. Each creates an `effective-html/` directory inside the chosen skills directory.
+The installer also accepts `--dest DIR` for another skills directory and `--force` to replace an existing install. It creates an `effective-html/` directory inside the chosen skills directory.
 
 Restart the agent after installing, then invoke it with:
 

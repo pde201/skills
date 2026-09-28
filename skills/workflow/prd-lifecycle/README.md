@@ -6,17 +6,20 @@ Requires `git`, `node` and an authenticated [`gh`](https://cli.github.com/).
 
 ## Installation
 
-### Via npx
+With the [skills.sh](https://skills.sh) CLI (add `--agent claude-code` or `--agent codex` to choose an agent, or drop `--global` for a project-local install):
+
 ```bash
-npx --yes github:pde201/skills/skills/workflow/prd-lifecycle
+npx --yes skills add pde201/skills --skill prd-lifecycle --global --yes
 ```
 
-### Via install.sh
+Or from a clone, with the skill's own installer (`agents|codex|claude`, default `agents`):
+
 ```bash
-./install.sh
+git clone https://github.com/pde201/skills.git
+./skills/skills/workflow/prd-lifecycle/install.sh claude
 ```
 
-Both accept a target (`agents`, `codex` or `claude`), `--dest DIR` and `--force`; run with `--help` for details.
+The installer also accepts `--dest DIR` for another skills directory and `--force` to replace an existing install; run it with `--help` for details.
 
 ## Scripts
 

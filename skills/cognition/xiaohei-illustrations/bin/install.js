@@ -8,9 +8,12 @@ const path = require("path");
 function usage() {
   console.log(`Install the Acuity xiaohei-illustrations skill.
 
-Usage:
-  npx --yes github:pde201/skills/skills/cognition/xiaohei-illustrations [codex|claude] [--force]
-  npx --yes github:pde201/skills/skills/cognition/xiaohei-illustrations --dest /path/to/skills-dir [--force]
+Usage (npm's npx cannot install from a git subdirectory, so fetch via a
+sparse clone instead of "npx github:..."):
+  git clone --filter=blob:none --sparse --depth 1 https://github.com/pde201/skills.git /tmp/xiaohei-illustrations-install
+  git -C /tmp/xiaohei-illustrations-install sparse-checkout set skills/cognition/xiaohei-illustrations
+  node /tmp/xiaohei-illustrations-install/skills/cognition/xiaohei-illustrations/bin/install.js [codex|claude] [--force]
+  node /tmp/xiaohei-illustrations-install/skills/cognition/xiaohei-illustrations/bin/install.js --dest /path/to/skills-dir [--force]
 
 Targets:
   codex   Install to \${CODEX_HOME:-$HOME/.codex}/skills
@@ -105,7 +108,7 @@ function main() {
     console.error(`error: ${destDir} already exists
 
 Run with --force to replace it:
-  npx --yes github:pde201/skills/skills/cognition/xiaohei-illustrations ${options.target} --force`);
+  node ${__filename} ${options.destBase ? `--dest "${options.destBase}"` : options.target} --force`);
     process.exit(1);
   }
 

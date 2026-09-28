@@ -23,27 +23,13 @@ It deliberately avoids commercial illustration, PPT infographics, formal flowcha
 
 Claude Code has no built-in image generator. This skill is **tool-agnostic**: it calls whatever image-generation tool is available in your environment (an MCP image tool or an image-generation CLI). If none is available, it runs in **planning mode** — producing the shot list and ready-to-paste prompts for you to run in your own image tool.
 
-## Direct npx Install
+## Install With skills.sh
 
-Install directly from this repo. Codex:
-
-```bash
-npx --yes github:pde201/skills/skills/cognition/xiaohei-illustrations codex
-```
-
-Claude Code:
+With the [skills.sh](https://skills.sh) CLI (drop `--global` for a project-local install):
 
 ```bash
-npx --yes github:pde201/skills/skills/cognition/xiaohei-illustrations claude
+npx --yes skills add pde201/skills --skill xiaohei-illustrations --global --agent claude-code --yes   # or --agent codex
 ```
-
-Custom skills directory:
-
-```bash
-npx --yes github:pde201/skills/skills/cognition/xiaohei-illustrations --dest "$HOME/.agents/skills"
-```
-
-If the skill is already installed, add `--force`.
 
 ## Clone-Based Install
 

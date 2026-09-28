@@ -276,7 +276,7 @@ SAMPLES = {
 <ul class="muted" style="margin-top:6px;padding-left:18px"><li><code>effective-html/SKILL.md</code></li><li><a href="https://thariqs.github.io/html-effectiveness/">HTML Effectiveness gallery</a></li></ul>
 </details>
 <div class="toolbar"><button class="btn" type="button" data-copy="#handoff">Copy handoff</button><button class="btn ghost" type="button" onclick="window.print()">Print</button></div>
-<pre class="soft" id="handoff">Use effective-html when layout improves cognition. Install: npx --yes github:pde201/skills/skills/cognition/effective-html</pre>
+<pre class="soft" id="handoff">Use effective-html when layout improves cognition. Install: npx --yes skills add pde201/skills --skill effective-html --global</pre>
 </section>
 </main>""",
     ),

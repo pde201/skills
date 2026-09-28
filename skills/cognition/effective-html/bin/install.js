@@ -8,9 +8,12 @@ const path = require("path");
 function usage() {
   console.log(`Install the Acuity effective-html skill.
 
-Usage:
-  npx --yes github:pde201/skills/skills/cognition/effective-html [agents|codex|claude] [--force]
-  npx --yes github:pde201/skills/skills/cognition/effective-html --dest /path/to/skills-dir [--force]
+Usage (npm's npx cannot install from a git subdirectory, so fetch via a
+sparse clone instead of "npx github:..."):
+  git clone --filter=blob:none --sparse --depth 1 https://github.com/pde201/skills.git /tmp/effective-html-install
+  git -C /tmp/effective-html-install sparse-checkout set skills/cognition/effective-html
+  node /tmp/effective-html-install/skills/cognition/effective-html/bin/install.js [agents|codex|claude] [--force]
+  node /tmp/effective-html-install/skills/cognition/effective-html/bin/install.js --dest /path/to/skills-dir [--force]
 
 Targets:
   agents  Install to \${AGENTS_HOME:-$HOME/.agents}/skills (default)
@@ -103,7 +106,7 @@ function main() {
     console.error(`error: ${destDir} already exists
 
 Run with --force to replace it:
-  npx --yes github:pde201/skills/skills/cognition/effective-html ${options.target} --force`);
+  node ${__filename} ${options.destBase ? `--dest "${options.destBase}"` : options.target} --force`);
     process.exit(1);
   }
 

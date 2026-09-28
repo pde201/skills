@@ -30,7 +30,8 @@ const SITE = {
   "https://shop.example/help": { snapshot: `- link "Back" [ref=e1, url=https://shop.example/login]`, text: "Help", go: {} },
 };
 
-function fakeBrowser({ changeOnce = false, failClick = false } = {}) {
+function fakeBrowser({ changeOnce = false, failClick = false, failClicks = failClick ? Infinity : 0, failMessage = "Unknown ref" } = {}) {
+  let clickFailures = failClicks;
   const log = [];
   let url = null;
   let pending = changeOnce;
@@ -56,7 +57,7 @@ function fakeBrowser({ changeOnce = false, failClick = false } = {}) {
     act(commands) {
       log.push(["act", commands.length]);
       for (const [verb, target, text] of commands) {
-        if (verb === "click" && failClick) throw new BrowserError("Unknown ref");
+        if (verb === "click" && clickFailures > 0) { clickFailures--; throw new BrowserError(failMessage); }
         const ref = target?.replace(/^@/, "");
         log.push(verb === "fill" ? ["fill", ref, text] : [verb, ref ?? target]);
         if (verb === "click" && current().go[ref]) url = current().go[ref];
@@ -223,9 +224,24 @@ test("an unavailable Driver hands back with driver_unavailable", async () => {
 });
 
 test("a failed browser action hands back its error", async () => {
-  const result = await run({ url: "http://localhost:4000/" }, fakeBrowser({ failClick: true }), scriptedDriver([['Click link "Rooms"', 0.9]]));
+  const result = await run({ url: "http://localhost:4000/" }, fakeBrowser({ failClick: true, failMessage: "Timeout 25000ms exceeded" }), scriptedDriver([['Click link "Rooms"', 0.9]]));
   assert.equal(result.status, "error");
-  assert.match(result.reason, /Unknown ref/);
+  assert.match(result.reason, /Timeout/);
+});
+
+test("a click on an element that was re-rendered looks again instead of failing", async () => {
+  const browser = fakeBrowser({ failClicks: 1, failMessage: "Element not found. Verify the selector is correct" });
+  const result = await run({ url: "http://localhost:4000/" }, browser, scriptedDriver([['Click link "Rooms"', 0.9], ['Click link "Rooms"', 0.9], ["DONE", 0.9]]));
+  assert.equal(result.status, "done");
+  assert.match(result.history[0].outcome, /^uncertain: the element was re-rendered/);
+  assert.equal(result.history[1].outcome, "taken");
+  assert.equal(result.url, "http://localhost:4000/rooms");
+});
+
+test("a page that keeps re-rendering the element still ends, after two looks", async () => {
+  const result = await run({ url: "http://localhost:4000/" }, fakeBrowser({ failClick: true, failMessage: "click failed" }), scriptedDriver([['Click link "Rooms"', 0.9]]));
+  assert.equal(result.status, "error");
+  assert.equal(result.history.filter((h) => h.outcome.startsWith("uncertain: the element was re-rendered")).length, 2);
 });
 
 test("the step limit ends a Run, and a later Run continues the session with its history", async () => {
@@ -329,4 +345,15 @@ test("a published search template on the same origin becomes a Site search", asy
   );
   assert.equal(result.status, "done");
   assert.equal(result.url, "https://code.example/search?q=is%3Apr%20author%3Ame&p=", "an optional parameter is left empty");
+});
+
+test("a page with thousands of controls sends the Driver only the top of the list", async () => {
+  const many = Array.from({ length: 3000 }, (_, i) => `- button "Line ${i}" [ref=e${i + 10}]`).join("\n");
+  SITE["http://localhost:4000/diff"] = { snapshot: `- link "Rooms" [ref=e1, url=http://localhost:4000/rooms]\n${many}`, text: "diff", go: {} };
+  const driver = scriptedDriver([["DONE", 0.9]]);
+  await run({ url: "http://localhost:4000/diff" }, fakeBrowser(), driver);
+  const controls = driver.asked[0].page.controls;
+  assert.ok(controls.length < 12200, `sent ${controls.length} characters`);
+  assert.match(controls, /^- link "Rooms"/);
+  assert.match(controls, /more characters of controls not shown\)$/);
 });

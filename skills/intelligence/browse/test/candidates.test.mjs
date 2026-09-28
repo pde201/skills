@@ -156,6 +156,7 @@ test("an OpenSearch template is used only as a GET on the page's own origin", as
   const github = `<OpenSearchDescription><Url type="text/html" method="get" template="https://github.com/search?q={searchTerms}&amp;ref=opensearch"/></OpenSearchDescription>`;
   assert.equal(parseTemplate(github), "https://github.com/search?q={searchTerms}&ref=opensearch");
   assert.equal(parseTemplate(`<Url type="application/x-suggestions+json" template="https://x/s?q={searchTerms}"/><Url type="text/html" method="post" template="https://x/p"/>`), null);
+  assert.equal(parseTemplate(`<Url type="text/html" template="https://x/s?q={searchTerms}&amp;note=&amp;lt;b&amp;gt;"/>`), "https://x/s?q={searchTerms}&note=&lt;b&gt;", "entities decode once");
 
   assert.equal(searchUrl("https://github.com/search?q={searchTerms}&ref=opensearch", "is:pr a&b", "https://github.com"), "https://github.com/search?q=is%3Apr%20a%26b&ref=opensearch");
   assert.equal(searchUrl("https://evil.example/?q={searchTerms}", "x", "https://github.com"), null, "another origin");

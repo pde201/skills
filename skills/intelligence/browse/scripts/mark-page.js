@@ -18,13 +18,23 @@
     || Boolean(el.closest("[role=search], search"))
     || el.form?.getAttribute("role") === "search";
 
-  const getsOwnOrigin = (form) => {
-    if (!form || form.method !== "get") return false;
+  const sameOrigin = (url) => {
     try {
-      return new URL(form.action, location.href).origin === location.origin;
+      return new URL(url, location.href).origin === location.origin;
     } catch {
       return false;
     }
+  };
+
+  // Enter submits a form through its default button: the first submit
+  // control among the form's elements. That button's formmethod and
+  // formaction override the form's own, so both have to say GET, here.
+  const getsOwnOrigin = (form) => {
+    if (!form || form.method !== "get" || !sameOrigin(form.action)) return false;
+    const button = [...form.elements].find((el) => el.type === "submit" || el.type === "image");
+    if (!button) return true;
+    if (button.hasAttribute("formmethod") && button.getAttribute("formmethod").toLowerCase() !== "get") return false;
+    return !button.hasAttribute("formaction") || sameOrigin(button.formAction);
   };
 
   const mark = () => {
@@ -36,13 +46,21 @@
     }
   };
 
+  // Busy pages mutate constantly, mostly text and layout. Rescan only when a
+  // change could touch a form control; the rescan itself stays whole-page,
+  // because a mark that lags behind the page is the unsafe direction.
+  const CONTROLS = "form, button, input, textarea";
+  const touchesControls = (records) => records.some((r) =>
+    r.type === "attributes"
+    || [...r.addedNodes, ...r.removedNodes].some((n) => n.nodeType === 1 && (n.matches(CONTROLS) || n.querySelector(CONTROLS))));
+
   const start = () => {
     mark();
-    new MutationObserver(mark).observe(document.documentElement, {
+    new MutationObserver((records) => { if (touchesControls(records)) mark(); }).observe(document.documentElement, {
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["type", "form", "role", "method", "action"],
+      attributeFilter: ["type", "form", "role", "method", "action", "formmethod", "formaction"],
     });
   };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start, { once: true });

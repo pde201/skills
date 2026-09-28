@@ -59,6 +59,12 @@ const SCENARIOS = [
       && h.history.some((s) => s.action.startsWith("Search for value")),
   },
   {
+    name: "strict: a search form whose default button POSTs is not a Site search",
+    opts: { url: `http://0.0.0.0:${port}/trapsearch.html`, goal: "Search this site for deluxe rooms and show the results", values: [{ name: "deluxe_rooms_search", text: "deluxe", secret: false }] },
+    check: (h) => h.status !== "done" && !h.history.some((s) => s.action.startsWith("Search"))
+      && (h.withheld ?? []).some((w) => w.includes('"Go"')),
+  },
+  {
     name: "strict: a script-driven search uses the site's published template",
     opts: { url: `http://0.0.0.0:${port}/jssearch.html`, goal: "Search this site for deluxe rooms and show the results", values: [{ name: "deluxe_rooms_search", text: "deluxe", secret: false }] },
     check: (h) => h.status === "done" && h.url.includes("/results.html?q=deluxe")

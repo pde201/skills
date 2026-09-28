@@ -21,6 +21,7 @@ node <this skill's dir>/scripts/browse.mjs run \
 - `--value NAME=TEXT` offers text the Driver may type into a matching field. Give each a descriptive name.
 - `--secret NAME=env:VAR` reads a password from the environment. Never put a secret on the command line. A secret is only ever typed into a password field on the starting origin or a trusted origin.
 - `--allow-origin ORIGIN` adds an origin a strict Run may visit (the start origin is always allowed).
+- `--reuse` with `--url` opens the new page in the already-running session instead of relaunching Chrome (about 1 s faster), when that session was launched with the same trust tier, allowed origins and profile. Cookies and logins from earlier Runs carry over, so use it for several Runs on one site, not to start unrelated work.
 - `--max-steps N` (default 10, at most 30). `--headed` shows the window. `--profile NAME` reuses a Chrome profile's logins — only when the user asks, since it turns off the domain allowlist.
 
 ## Trusted and untrusted origins

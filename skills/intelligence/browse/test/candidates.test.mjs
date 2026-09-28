@@ -22,8 +22,8 @@ const SNAPSHOT = `- heading "Hotel search" [level=1, ref=e1]
 const PAGE = {
   snapshot: SNAPSHOT,
   origin: "http://shop.test",
-  formRefs: new Set(["e11", "e12", "e7", "e8", "e9", "e10"]),
-  types: new Map([["e9", "submit"], ["e10", "button"], ["e11", "email"], ["e12", "password"], ["e6", "search"]]),
+  submits: new Set(["e9"]),
+  types: new Map([["e11", "email"], ["e12", "password"], ["e6", "search"]]),
 };
 
 const labels = (built) => Object.values(built.options);
@@ -58,12 +58,14 @@ test("on a trusted origin, nothing is withheld and Enter is offered", () => {
   assert.ok(built.options.ENTER);
 });
 
-test("an untyped button in a form submits it; a script link is consequential", () => {
-  const ctx = { pageOrigin: "http://shop.test", formRefs: new Set(["e1"]), types: new Map([["e1", null]]) };
-  assert.equal(consequentialReason({ role: "button", name: "Next", ref: "e1", attrs: {} }, ctx), "submits a form");
-  assert.equal(consequentialReason({ role: "button", name: "Next", ref: "e2", attrs: {} }, ctx), null);
-  assert.equal(consequentialReason({ role: "link", name: "Go", ref: "e3", attrs: { url: "javascript:void(0)" } }, ctx), "script link");
-  assert.equal(consequentialReason({ role: "link", name: "Go", ref: "e4", attrs: { url: "/relative" } }, ctx), null);
+test("a marked submit control is consequential wherever its form is; a script link is too", () => {
+  // Two forms: a CSS-scoped snapshot only ever saw the first one.
+  const ctx = { pageOrigin: "http://shop.test", submits: new Set(["e2", "e3"]) };
+  assert.equal(consequentialReason({ role: "button", name: "Go", ref: "e2", attrs: {} }, ctx), "submits a form");
+  assert.equal(consequentialReason({ role: "button", name: "Next", ref: "e3", attrs: {} }, ctx), "submits a form");
+  assert.equal(consequentialReason({ role: "button", name: "Outside", ref: "e1", attrs: {} }, ctx), null);
+  assert.equal(consequentialReason({ role: "link", name: "Go", ref: "e4", attrs: { url: "javascript:void(0)" } }, ctx), "script link");
+  assert.equal(consequentialReason({ role: "link", name: "Go", ref: "e5", attrs: { url: "/relative" } }, ctx), null);
 });
 
 test("a secret value goes only into a password field, and only where secrets are allowed", () => {
@@ -87,14 +89,14 @@ test("NEEDS_INPUT is offered only when some field has no value to type", () => {
 });
 
 test("identical labels are dropped, since the Driver cannot tell them apart", () => {
-  const page = { ...PAGE, snapshot: `- button "Edit" [ref=e1]\n- button "Edit" [ref=e2]\n- button "Save" [ref=e3]\n- link "Edit" [ref=e4]`, formRefs: new Set(), types: new Map() };
+  const page = { ...PAGE, snapshot: `- button "Edit" [ref=e1]\n- button "Edit" [ref=e2]\n- button "Save" [ref=e3]\n- link "Edit" [ref=e4]`, submits: new Set(), types: new Map() };
   const built = buildCandidates(page, { trusted: true, secretsAllowed: true });
   assert.deepEqual(Object.values(built.actions).map((a) => a.ref), ["e3", "e4"]);
 });
 
 test("the option cap keeps every control and says how many actions were left out", () => {
   const snapshot = Array.from({ length: 40 }, (_, i) => `- link "Item ${i}" [ref=e${i}, url=http://shop.test/${i}]`).join("\n");
-  const built = buildCandidates({ ...PAGE, snapshot }, { trusted: false, secretsAllowed: true, limit: 20 });
+  const built = buildCandidates({ ...PAGE, snapshot, submits: new Set() }, { trusted: false, secretsAllowed: true, limit: 20 });
   assert.ok(Object.keys(built.options).length <= 20);
   assert.ok(built.options.DONE && built.options.BLOCKED && built.options.WAIT);
   assert.equal(built.omitted, 40 - Object.keys(built.actions).length);

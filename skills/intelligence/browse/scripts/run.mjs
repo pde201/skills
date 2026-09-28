@@ -65,6 +65,30 @@ function writePolicy() {
   return path;
 }
 
+/**
+ * Why acting on `ref` is no longer safe after the page went from `before`
+ * to `after`, or null. Refs stay bound to one element, so a change
+ * elsewhere does not move the click; the chosen element changing does,
+ * and so does anything new appearing — snapshots do not show dialogs,
+ * but an overlay always brings controls of its own.
+ */
+export function staleReason(ref, before, after) {
+  const was = new Map(parseSnapshot(before).map((e) => [e.ref, e]));
+  const now = new Map(parseSnapshot(after).map((e) => [e.ref, e]));
+  const a = was.get(ref);
+  const b = now.get(ref);
+  if (!b) return "the chosen element is gone";
+  if (a && (a.role !== b.role || a.name !== b.name || a.attrs.url !== b.attrs.url || a.attrs.checked !== b.attrs.checked)) {
+    return "the chosen element changed";
+  }
+  if ([...now.keys()].some((r) => !was.has(r))) return "new elements appeared";
+  return null;
+}
+
+const sameLaunch = (a, b) =>
+  a.tier === b.tier && (a.profile ?? null) === (b.profile ?? null)
+  && [...a.allowOrigins].sort().join() === [...b.allowOrigins].sort().join();
+
 const digest = (text) => createHash("sha256").update(text).digest("hex").slice(0, 16);
 const round = (n) => Math.round(n * 100) / 100;
 
@@ -79,6 +103,7 @@ const round = (n) => Math.round(n * 100) / 100;
  * @param {number} [opts.maxSteps]
  * @param {string} [opts.profile]
  * @param {boolean} [opts.headed]
+ * @param {boolean} [opts.reuse]   open --url in the running session when its launch settings match
  * @param {object} deps
  * @param {object} deps.browser  from agentBrowser()
  * @param {Function} deps.choose from driver.mjs
@@ -92,6 +117,7 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
   let cost = 0;
   let meta;
   let page = null;
+  let reused = null;
 
   const handback = (status, reason, extra = {}) => {
     if (meta) {
@@ -117,34 +143,54 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
     if (!startOrigin) return handback("error", `${opts.url} has no origin to start from`);
     const allowOrigins = [startOrigin, ...(opts.allowOrigins ?? []).map(originOf).filter(Boolean)];
     const tier = allowOrigins.every((o) => isTrusted(o, trustedOrigins)) ? "trusted" : "strict";
+    const previous = opts.reuse ? loadMeta(session) : null;
     meta = { tier, startOrigin, allowOrigins, profile: profile ?? null, history: [] };
-    try {
-      browser.close();
-      browser.launch(opts.url, launchFlags({ tier, allowOrigins, policyPath: writePolicy(), profile, headed }));
-    } catch (err) {
-      return handback("error", `could not open ${opts.url}: ${err.message}`);
+    // --reuse skips Chrome's ~1 s start when the open session was launched
+    // with the same settings. Its cookies and logins carry over, which is
+    // why it is opt-in: the default is a fresh, logged-out session.
+    if (previous && sameLaunch(previous, meta)) {
+      try {
+        reused = browser.act(["open", opts.url]);
+      } catch {
+        reused = null; // the session is gone; launch a fresh one
+      }
+    }
+    if (!reused) {
+      try {
+        browser.close();
+        browser.launch(opts.url, launchFlags({ tier, allowOrigins, policyPath: writePolicy(), profile, headed }));
+      } catch (err) {
+        return handback("error", `could not open ${opts.url}: ${err.message}`);
+      }
     }
   } else {
     meta = loadMeta(session);
     if (!meta) return handback("error", `no Run has opened session "${session}"; pass --url to start one`);
   }
 
-  const observe = () => {
-    const seen = browser.page();
+  // Adds what a snapshot does not say: the origin, and which buttons
+  // submit a form and which fields take passwords (one call, when needed).
+  const observe = (seen) => {
     const origin = originOf(seen.url);
     const trusted = isTrusted(origin, trustedOrigins);
-    const needTypes = parseSnapshot(seen.snapshot)
-      .filter((e) => (!trusted && e.role === "button" && seen.formRefs.has(e.ref)) || (values.length && (e.role === "textbox" || e.role === "searchbox")))
-      .map((e) => e.ref);
-    return { ...seen, origin, trusted, types: browser.types(needTypes) };
+    const elements = parseSnapshot(seen.snapshot);
+    const buttons = trusted ? [] : elements.filter((e) => e.role === "button").map((e) => e.ref);
+    const fields = values.length ? elements.filter((e) => e.role === "textbox" || e.role === "searchbox").map((e) => e.ref) : [];
+    return { ...seen, origin, trusted, ...browser.attrs(buttons, fields) };
   };
 
   let waits = 0;
   const tried = new Set();
+  let seen = reused;
+  try {
+    seen ??= browser.page();
+  } catch (err) {
+    return handback("error", `could not read the page: ${err.message}`);
+  }
 
   for (let step = 1; step <= maxSteps; step++) {
     try {
-      page = observe();
+      page = observe(seen);
     } catch (err) {
       return handback("error", `could not read the page: ${err.message}`);
     }
@@ -199,30 +245,16 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
       return handback("no_progress", `"${label}" was already tried on this same page`);
     }
 
-    try {
-      if (choice === "WAIT") {
-        if (++waits >= MAX_WAITS) {
-          record("not taken: waited too often");
-          return handback("no_progress", `the page was still loading after ${MAX_WAITS} waits`);
-        }
-        browser.wait(1000);
-        tried.add(key);
-        record("waited");
-        continue;
+    let command;
+    if (choice === "WAIT") {
+      if (++waits >= MAX_WAITS) {
+        record("not taken: waited too often");
+        return handback("no_progress", `the page was still loading after ${MAX_WAITS} waits`);
       }
+      command = ["wait", "1000"];
+    } else {
       waits = 0;
-
-      if (action.ref) {
-        // The page may have changed while the Driver was deciding; a ref
-        // chosen on the old page may now point somewhere else.
-        const now = browser.page();
-        if (now.snapshot !== page.snapshot) {
-          record("not taken: the page changed before acting");
-          continue;
-        }
-      }
-
-      if (action.kind === "click") browser.click(action.ref);
+      if (action.kind === "click") command = ["click", `@${action.ref}`];
       else if (action.kind === "type") {
         const value = byName.get(action.value);
         // buildCandidates already enforces this; checked again where the
@@ -231,12 +263,28 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
           record("not taken: secret value outside a password field on an allowed origin");
           return handback("needs_input", "a secret value may only be typed into a password field on the starting or a trusted origin");
         }
-        browser.fill(action.ref, value.text);
-      } else if (choice === "SCROLL_DOWN") browser.scroll("down");
-      else if (choice === "SCROLL_UP") browser.scroll("up");
-      else if (choice === "ESCAPE") browser.press("Escape");
-      else if (choice === "ENTER") browser.press("Enter");
+        command = ["fill", `@${action.ref}`, value.text];
+      } else if (choice === "SCROLL_DOWN") command = ["scroll", "down", "600"];
+      else if (choice === "SCROLL_UP") command = ["scroll", "up", "600"];
+      else if (choice === "ESCAPE") command = ["press", "Escape"];
+      else if (choice === "ENTER") command = ["press", "Enter"];
       else return handback("error", `unknown option ${choice}`);
+    }
+
+    try {
+      if (action.ref) {
+        // The page may have changed while the Driver was deciding; a ref
+        // chosen on the old page may now point somewhere else. If it did,
+        // this read is the next step's page.
+        const now = browser.page();
+        const stale = now.snapshot === page.snapshot ? null : staleReason(action.ref, page.snapshot, now.snapshot);
+        if (stale) {
+          record(`not taken: ${stale} before acting`);
+          seen = now;
+          continue;
+        }
+      }
+      seen = browser.act(command);
     } catch (err) {
       if (!(err instanceof BrowserError)) throw err;
       record(`failed: ${err.message}`);
@@ -245,7 +293,7 @@ export async function runBrowse(opts, { browser, choose, limit = 255 }) {
     // Only an action that ran counts as tried: one skipped because the page
     // changed may be exactly right on the page as it is now.
     tried.add(key);
-    record("taken");
+    record(choice === "WAIT" ? "waited" : "taken");
   }
 
   return handback("step_limit", `stopped after ${maxSteps} steps`);

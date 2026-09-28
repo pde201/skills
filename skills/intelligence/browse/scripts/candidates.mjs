@@ -61,11 +61,11 @@ const quote = (s) => `"${s}"`;
 
 /**
  * Why an element is a Consequential control on an untrusted origin, or
- * null. `formRefs` are refs inside a <form>; `types` maps ref → the
- * element's `type` attribute (null when absent).
+ * null. `submits` holds the refs of controls that would submit a form.
  */
-export function consequentialReason(element, { pageOrigin, formRefs, types }) {
+export function consequentialReason(element, { pageOrigin, submits }) {
   if (CONSEQUENTIAL_LABEL.test(element.name)) return "label";
+  if (submits.has(element.ref)) return "submits a form";
   if (element.role === "link" && element.attrs.url) {
     if (/^javascript:/i.test(element.attrs.url)) return "script link";
     let target = null;
@@ -76,11 +76,6 @@ export function consequentialReason(element, { pageOrigin, formRefs, types }) {
     }
     if (target !== pageOrigin) return "leads to another origin";
   }
-  if (element.role === "button" && formRefs.has(element.ref)) {
-    // A <button> in a form submits it unless it says otherwise.
-    const type = types.get(element.ref);
-    if (type !== "button" && type !== "reset") return "submits a form";
-  }
   return null;
 }
 
@@ -90,8 +85,8 @@ export function consequentialReason(element, { pageOrigin, formRefs, types }) {
  * @param {object} page
  * @param {string} page.snapshot   `snapshot -i --urls` text
  * @param {string} page.origin
- * @param {Set<string>} page.formRefs
- * @param {Map<string, string|null>} page.types
+ * @param {Set<string>} page.submits    refs of controls that would submit a form
+ * @param {Map<string, string|null>} page.types  field ref → its `type` attribute
  * @param {object} opts
  * @param {boolean} opts.trusted          the page's origin is a Trusted origin
  * @param {boolean} opts.secretsAllowed   Secret values may be typed on this origin
@@ -113,7 +108,7 @@ export function buildCandidates(page, { trusted, secretsAllowed, values = [], li
     if (!isClick && !isToggle && !isType) continue;
 
     if (!trusted && (isClick || isToggle)) {
-      const why = consequentialReason(element, { pageOrigin: page.origin, formRefs: page.formRefs, types: page.types });
+      const why = consequentialReason(element, { pageOrigin: page.origin, submits: page.submits });
       if (why) {
         withheld.push(`${element.role} ${quote(element.name)} (${why})`);
         continue;

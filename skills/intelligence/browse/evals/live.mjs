@@ -44,6 +44,15 @@ const SCENARIOS = [
       && b.fieldValues().includes("hunter2"),
   },
   {
+    name: "strict: a submit button in the page's second form is withheld too",
+    opts: {
+      url: `http://0.0.0.0:${port}/twoforms.html`,
+      goal: "Sign up for the newsletter with my email",
+      values: [{ name: "email", text: "me@example.com", secret: false }],
+    },
+    check: (h) => h.status === "consequential" && h.withheld.some((w) => w.includes('"Next"')),
+  },
+  {
     name: "strict: a goal that needs a withheld control hands it back",
     opts: { url: `http://0.0.0.0:${port}/`, goal: "Buy a gift card" },
     check: (h) => h.status === "consequential" && h.withheld.some((w) => w.includes("Buy gift card")),

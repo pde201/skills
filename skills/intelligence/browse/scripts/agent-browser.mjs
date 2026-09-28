@@ -4,7 +4,10 @@
 // ──────────────────────────────────────────────────────────────────────
 
 import { execFileSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { hostsOf } from "./origins.mjs";
+
+const MARK_SUBMITS = fileURLToPath(new URL("./mark-submits.js", import.meta.url));
 
 // agent-browser's own names for the actions strict mode denies. These are
 // the names its policy matches (`evaluate`, not the documented `eval`);
@@ -26,7 +29,7 @@ const PAGE_TEXT_CHARS = 6000;
  * agent-browser refuses to combine with one.
  */
 export function launchFlags({ tier, allowOrigins, policyPath, profile, headed }) {
-  const flags = ["--max-output", String(MAX_OUTPUT)];
+  const flags = ["--max-output", String(MAX_OUTPUT), "--init-script", MARK_SUBMITS];
   if (tier === "strict") {
     flags.push("--content-boundaries", "--action-policy", policyPath);
     if (!profile) flags.push("--allowed-domains", hostsOf(allowOrigins).join(","));
@@ -43,19 +46,37 @@ export class BrowserError extends Error {}
 // look like a changed page.
 const withoutBoundaries = (text) => text.split("\n").filter((line) => !/^--- .*AGENT_BROWSER/.test(line)).join("\n");
 
+const PAGE_READS = [["get", "text", "body"], ["snapshot", "-i", "--urls"], ["get", "url"]];
+
+function readPage([text, snap, url]) {
+  if (!snap?.success) throw new BrowserError(snap?.error ?? "snapshot failed");
+  return {
+    snapshot: withoutBoundaries(snap.result?.snapshot ?? ""),
+    // The interactive snapshot has no prose, and the result a goal asks
+    // for is usually prose: without it the Driver can never see `done`.
+    text: withoutBoundaries(text?.success ? text.result?.text ?? "" : "").slice(0, PAGE_TEXT_CHARS),
+    url: url?.result?.url ?? null,
+  };
+}
+
 /**
+ * Every call to agent-browser costs ~160 ms however little it does, and a
+ * batch of several commands costs about the same as one. So each method
+ * here is one call, and an action carries the next page read with it.
+ *
  * @param {object} opts
  * @param {string} opts.session
  * @param {string} [opts.bin]
  */
 export function agentBrowser({ session, bin = process.env.BROWSE_AGENT_BROWSER || "agent-browser" }) {
-  const run = (args) => {
+  const run = (args, input) => {
     let out;
     try {
       out = execFileSync(bin, ["--session", session, "--json", ...args], {
         encoding: "utf8",
         timeout: 30000,
-        stdio: ["ignore", "pipe", "pipe"],
+        input,
+        stdio: ["pipe", "pipe", "pipe"],
         maxBuffer: 16 * 1024 * 1024,
       });
     } catch (err) {
@@ -72,7 +93,10 @@ export function agentBrowser({ session, bin = process.env.BROWSE_AGENT_BROWSER |
     if (!Array.isArray(parsed) && parsed.success === false) throw new BrowserError(parsed.error ?? "agent-browser failed");
     return parsed;
   };
-  const batch = (commands) => (commands.length ? run(["batch", ...commands]) : []);
+  // Commands go as argv arrays on stdin: no quoting, and a typed value
+  // never appears on a command line other processes can read.
+  const batch = (commands, bail = false) =>
+    (commands.length ? run(["batch", ...(bail ? ["--bail"] : [])], JSON.stringify(commands)) : []);
 
   return {
     close() {
@@ -83,34 +107,32 @@ export function agentBrowser({ session, bin = process.env.BROWSE_AGENT_BROWSER |
       run([...flags, "open", url]);
     },
 
-    /** One step's view of the page: snapshot, form membership, attributes. */
+    /** The page as the Run sees it: visible text, interactive elements, URL. */
     page() {
-      // The full snapshot goes last: each snapshot replaces agent-browser's
-      // ref table, and the refs the Run acts on must come from the full one.
-      const [text, form, snap, url] = batch(["get text body", "snapshot -i -s form", "snapshot -i --urls", "get url"]);
-      if (!snap?.success) throw new BrowserError(snap?.error ?? "snapshot failed");
-      const formText = form?.success ? form.result?.snapshot ?? "" : "";
-      const formRefs = new Set([...formText.matchAll(/ref=(e\d+)/g)].map((m) => m[1]));
+      return readPage(batch(PAGE_READS));
+    },
+
+    /**
+     * Which of `buttons` would submit a form, and the `type` of each of
+     * `fields` (null where it has none). One call for both.
+     */
+    attrs(buttons, fields) {
+      const results = batch([
+        ...buttons.map((ref) => ["get", "attr", `@${ref}`, "data-browse-submits"]),
+        ...fields.map((ref) => ["get", "attr", `@${ref}`, "type"]),
+      ]);
+      const value = (i) => (results[i]?.success ? results[i].result?.value ?? null : null);
       return {
-        snapshot: withoutBoundaries(snap.result?.snapshot ?? ""),
-        // The interactive snapshot has no prose, and the result a goal asks
-        // for is usually prose: without it the Driver can never see `done`.
-        text: withoutBoundaries(text?.success ? text.result?.text ?? "" : "").slice(0, PAGE_TEXT_CHARS),
-        formRefs,
-        url: url?.result?.url ?? null,
+        submits: new Set(buttons.filter((_, i) => value(i) !== null)),
+        types: new Map(fields.map((ref, i) => [ref, value(buttons.length + i)])),
       };
     },
 
-    /** The `type` attribute of each ref; null where it has none. */
-    types(refs) {
-      const results = batch(refs.map((ref) => `get attr @${ref} type`));
-      return new Map(refs.map((ref, i) => [ref, results[i]?.success ? results[i].result?.value ?? null : null]));
+    /** Perform one action and read the page it leaves, in one call. */
+    act(command) {
+      const [result, ...reads] = batch([command, ...PAGE_READS], true);
+      if (!result?.success) throw new BrowserError(result?.error ?? `${command[0]} failed`);
+      return readPage(reads);
     },
-
-    click: (ref) => run(["click", `@${ref}`]),
-    fill: (ref, text) => run(["fill", `@${ref}`, text]),
-    press: (key) => run(["press", key]),
-    scroll: (direction) => run(["scroll", direction, "600"]),
-    wait: (ms) => run(["wait", String(ms)]),
   };
 }

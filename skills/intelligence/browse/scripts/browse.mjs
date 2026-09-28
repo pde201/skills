@@ -5,7 +5,7 @@
 //    browse run --goal TEXT [--url URL] [--session NAME]
 //               [--value NAME=TEXT]... [--secret NAME=env:VAR]...
 //               [--allow-origin ORIGIN]... [--max-steps N]
-//               [--profile NAME] [--headed]
+//               [--profile NAME] [--headed] [--reuse]
 //    browse close [--session NAME]
 //
 //  A Secret value is read from the environment, never the command line,
@@ -22,13 +22,13 @@ import { runBrowse } from "./run.mjs";
 const USAGE = `usage:
   browse run --goal TEXT [--url URL] [--session NAME] [--value NAME=TEXT]...
              [--secret NAME=env:VAR]... [--allow-origin ORIGIN]... [--max-steps N]
-             [--profile NAME] [--headed]
+             [--profile NAME] [--headed] [--reuse]
   browse close [--session NAME]
 
 Trusted origins: localhost, plus exact origins in BROWSE_TRUSTED_ORIGINS (comma-separated).`;
 
 const MULTI = new Set(["--value", "--secret", "--allow-origin"]);
-const FLAGS = new Set(["--headed"]);
+const FLAGS = new Set(["--headed", "--reuse"]);
 const SINGLE = new Set(["--goal", "--url", "--session", "--max-steps", "--profile"]);
 
 export function parseArgs(argv, env = process.env) {
@@ -77,6 +77,7 @@ export function parseArgs(argv, env = process.env) {
     maxSteps: opts["max-steps"] ? Number(opts["max-steps"]) : undefined,
     profile: opts.profile,
     headed: Boolean(opts.headed),
+    reuse: Boolean(opts.reuse),
   };
 }
 

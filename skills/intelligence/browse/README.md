@@ -19,12 +19,16 @@ export TYPESAFE_API_KEY=...
 
 Each step (`scripts/run.mjs`):
 
-1. Read the page: its visible text, its interactive elements (`snapshot -i --urls`), which of them sit inside a form, and the `type` of buttons and fields that need it.
-2. Build the Candidates (`scripts/candidates.mjs`): visible, named, interactive elements, minus duplicates. On an untrusted origin, Consequential controls are withheld: labels like buy, send or delete; buttons that submit a form; links to another origin. Named values become `Type value "email" into textbox "Email"`; a Secret value is offered only for a password field on the starting or a trusted origin. At most 255 options, controls included.
+1. Read the page: its visible text, its interactive elements (`snapshot -i --urls`), which buttons would submit a form, and which fields take passwords. Form submits are marked in the page by `scripts/mark-submits.js`, an init script that asks the browser itself (`el.form`, `el.type`); a CSS-scoped snapshot only ever sees a page's first form.
+2. Build the Candidates (`scripts/candidates.mjs`): visible, named, interactive elements, minus duplicates. On an untrusted origin, Consequential controls are withheld: labels like buy, send or delete; controls that submit a form; links to another origin. Named values become `Type value "email" into textbox "Email"`; a Secret value is offered only for a password field on the starting or a trusted origin. At most 255 options, controls included.
 3. Ask Jev one `choice` question (`scripts/driver.mjs`). Option labels are sent unredacted; the page state goes through jev's redaction.
 4. Check the answer: it must carry a confidence and pick its own most probable option; a click needs 0.55, typing 0.75 (`BROWSE_MIN_CONFIDENCE`, `BROWSE_MIN_TYPE_CONFIDENCE`).
-5. Re-read the page. If it changed while Jev decided, choose again rather than act on a stale ref.
-6. Act, or hand back.
+5. Re-read the page. If the chosen element changed or disappeared while Jev decided, or anything new appeared (snapshots do not show dialogs, but an overlay brings controls of its own), choose again. Refs stay bound to one element, so other changes — a clock, a removed banner — do not move the click and do not cost a re-decide.
+6. Act, or hand back. The action and the next step's page read go in one agent-browser call.
+
+Every agent-browser call costs about 160 ms however little it does, while a batch of commands costs about the same as one, so `scripts/agent-browser.mjs` makes each method one call and sends commands as JSON on stdin (which also keeps typed values off the command line). A step is two or three calls plus one Jev request (~130 ms).
+
+A new Run relaunches Chrome (~1 s) unless it passes `--reuse` and the running session was launched with the same tier, allowed origins and profile; then it only opens the URL. Reuse keeps cookies and logins, so it is opt-in.
 
 A Run whose origins are all trusted launches agent-browser with only an output cap. Any other Run is strict: `--content-boundaries`, a domain allowlist (unless `--profile`), and an action policy denying `evaluate`, uploads, downloads, cookie and storage access, network routing, state export and the clipboard. agent-browser's policy matches its internal action names, which are not the documented category names (`evaluate`, not `eval`); `scripts/agent-browser.mjs` lists the ones verified against 0.27.
 
@@ -37,7 +41,7 @@ npm test          # offline: candidates, the Run loop against a fake browser, th
 npm run eval:live # real agent-browser and Jev on a local fixture site; skips without a key
 ```
 
-The live eval serves `evals/site` on `localhost` (trusted) and `0.0.0.0` (untrusted) and checks three Runs: navigating to a fact, filling a login form and stopping at its submit despite injected page text, and handing back a withheld purchase.
+The live eval serves `evals/site` on `localhost` (trusted) and `0.0.0.0` (untrusted) and checks four Runs: navigating to a fact; filling a login form and stopping at its submit despite injected page text; withholding the submit button of a page's second form; and handing back a withheld purchase.
 
 ## Limits
 

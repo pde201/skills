@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 process.env.BROWSE_STATE_DIR = mkdtempSync(join(tmpdir(), "browse-run-"));
 
-const { runBrowse, CLICK_FLOOR, TYPE_FLOOR } = await import("../scripts/run.mjs");
+const { runBrowse, staleReason, CLICK_FLOOR, TYPE_FLOOR } = await import("../scripts/run.mjs");
 const { launchFlags, BrowserError } = await import("../scripts/agent-browser.mjs");
 const { DriverUnavailable } = await import("../scripts/driver.mjs");
 
@@ -23,8 +23,8 @@ const SITE = {
   "https://shop.example/login": {
     snapshot: `- textbox "Email" [ref=e1]\n- textbox "Password" [ref=e2]\n- button "Sign in" [ref=e3]\n- link "Help" [ref=e4, url=https://shop.example/help]`,
     text: "Sign in",
-    formRefs: ["e1", "e2", "e3"],
-    types: { e1: "email", e2: "password", e3: "submit" },
+    submits: ["e3"],
+    types: { e1: "email", e2: "password" },
     go: { e4: "https://shop.example/help" },
   },
   "https://shop.example/help": { snapshot: `- link "Back" [ref=e1, url=https://shop.example/login]`, text: "Help", go: {} },
@@ -33,30 +33,34 @@ const SITE = {
 function fakeBrowser({ changeOnce = false, failClick = false } = {}) {
   const log = [];
   let url = null;
-  let flicker = changeOnce;
+  let pending = changeOnce;
+  let changed = false;
   const current = () => SITE[url];
+  // Once the page changes (an element appears), it stays changed.
+  const read = () => ({ snapshot: current().snapshot + (changed ? `\n- button "Ad" [ref=e99]` : ""), text: current().text, url });
   return {
     log,
     close: () => log.push(["close"]),
     launch: (to, flags) => { url = to; log.push(["launch", to, flags]); },
     page() {
-      const p = current();
-      let snapshot = p.snapshot;
-      // The first freshness check after a decision sees a changed page.
-      if (flicker && log.some((e) => e[0] === "page")) { snapshot += `\n- button "Ad" [ref=e99]`; flicker = false; }
+      // The page changes while the Driver makes its first decision.
+      if (pending && log.some((e) => e[0] === "page")) { changed = true; pending = false; }
       log.push(["page"]);
-      return { snapshot, text: p.text, url, formRefs: new Set(p.formRefs ?? []) };
+      return read();
     },
-    types: (refs) => new Map(refs.map((r) => [r, current().types?.[r] ?? null])),
-    click(ref) {
-      if (failClick) throw new BrowserError("Unknown ref");
-      log.push(["click", ref]);
-      if (current().go[ref]) url = current().go[ref];
+    attrs: (buttons, fields) => ({
+      submits: new Set(buttons.filter((r) => current().submits?.includes(r))),
+      types: new Map(fields.map((r) => [r, current().types?.[r] ?? null])),
+    }),
+    act(command) {
+      const [verb, target, text] = command;
+      if (verb === "click" && failClick) throw new BrowserError("Unknown ref");
+      const ref = target?.replace(/^@/, "");
+      log.push(verb === "fill" ? ["fill", ref, text] : [verb, ref ?? target]);
+      if (verb === "click" && current().go[ref]) url = current().go[ref];
+      if (verb === "open") url = target;
+      return read();
     },
-    fill: (ref, text) => log.push(["fill", ref, text]),
-    press: (key) => log.push(["press", key]),
-    scroll: (dir) => log.push(["scroll", dir]),
-    wait: (ms) => log.push(["wait", ms]),
   };
 }
 
@@ -95,10 +99,14 @@ test("a Run follows the Driver to done and hands back for verification", async (
 test("a trusted launch uses only the output cap; a strict one turns every guard on", async () => {
   const browser = fakeBrowser();
   await run({ url: "http://localhost:4000/" }, browser, scriptedDriver([["DONE", 0.9]]));
-  assert.deepEqual(browser.log.find((e) => e[0] === "launch")[2], ["--max-output", "20000"]);
+  const flags = browser.log.find((e) => e[0] === "launch")[2];
+  assert.deepEqual(flags.slice(0, 2), ["--max-output", "20000"]);
+  assert.equal(flags[2], "--init-script");
+  assert.match(flags[3], /mark-submits\.js$/);
+  assert.equal(flags.length, 4);
 
   const strict = launchFlags({ tier: "strict", allowOrigins: ["https://shop.example", "https://cdn.shop.example:8443"], policyPath: "/p.json" });
-  assert.deepEqual(strict, ["--max-output", "20000", "--content-boundaries", "--action-policy", "/p.json", "--allowed-domains", "shop.example,cdn.shop.example"]);
+  assert.deepEqual(strict.slice(4), ["--content-boundaries", "--action-policy", "/p.json", "--allowed-domains", "shop.example,cdn.shop.example"]);
   const withProfile = launchFlags({ tier: "strict", allowOrigins: ["https://shop.example"], policyPath: "/p.json", profile: "Default" });
   assert.ok(!withProfile.includes("--allowed-domains"), "agent-browser refuses an allowlist with a profile");
   assert.ok(withProfile.includes("--action-policy"));
@@ -185,13 +193,14 @@ test("three waits in a row end the Run as no_progress", async () => {
   // The same WAIT on the same page is also a repeat; either way it stops early.
   assert.equal(result.status, "no_progress");
   assert.ok(browser.log.filter((e) => e[0] === "wait").length <= 2);
+  assert.ok(browser.log.filter((e) => e[0] === "page").length === 1, "each wait reads the next page in the same call");
 });
 
 test("a page that changes while the Driver decides is looked at again, not clicked blind", async () => {
   const browser = fakeBrowser({ changeOnce: true });
   const driver = scriptedDriver([['Click link "Rooms"', 0.9], ['Click link "Rooms"', 0.9], ["DONE", 0.9]]);
   const result = await run({ url: "http://localhost:4000/" }, browser, driver);
-  assert.equal(result.history[0].outcome, "not taken: the page changed before acting");
+  assert.equal(result.history[0].outcome, "not taken: new elements appeared before acting");
   assert.equal(result.history[1].outcome, "taken");
 });
 
@@ -233,4 +242,45 @@ test("continuing a session no Run opened is an error, not a guess", async () => 
   const result = await runBrowse({ session: "never-opened", goal: "g" }, { browser: fakeBrowser(), choose: async () => assert.fail() });
   assert.equal(result.status, "error");
   assert.match(result.reason, /pass --url/);
+});
+
+test("only a change that could move the click forces a re-decide", () => {
+  const before = `- link "Rooms" [ref=e1, url=http://x/rooms]\n- button "Next" [ref=e2]\n- button "12:00" [ref=e3]`;
+  assert.equal(staleReason("e2", before, before.replace("12:00", "12:01")), null, "a clock ticking elsewhere");
+  assert.equal(staleReason("e2", before, before.replace(`\n- button "12:00" [ref=e3]`, "")), null, "something elsewhere going away");
+  assert.equal(staleReason("e2", before, before.replace('"Next"', '"Pay"')), "the chosen element changed");
+  assert.equal(staleReason("e1", before, before.replace("x/rooms", "evil/rooms")), "the chosen element changed");
+  assert.equal(staleReason("e2", before, before.replace(`\n- button "Next" [ref=e2]`, "")), "the chosen element is gone");
+  assert.equal(staleReason("e2", before, `${before}\n- button "Close" [ref=e9]`), "new elements appeared", "an overlay brings controls");
+});
+
+test("a changed clock elsewhere does not stop the click", async () => {
+  SITE["http://localhost:4000/clock"] = { snapshot: `- button "12:00" [ref=e2]\n- link "Rooms" [ref=e1, url=http://localhost:4000/rooms]`, text: "", go: { e1: "http://localhost:4000/rooms" } };
+  const browser = fakeBrowser();
+  const page = browser.page;
+  let reads = 0;
+  browser.page = () => { const p = page(); if (++reads === 2) p.snapshot = p.snapshot.replace("12:00", "12:01"); return p; };
+  const result = await run({ url: "http://localhost:4000/clock" }, browser, scriptedDriver([['Click link "Rooms"', 0.9], ["DONE", 0.9]]));
+  assert.equal(result.history[0].outcome, "taken");
+  assert.equal(result.url, "http://localhost:4000/rooms");
+});
+
+test("--reuse opens the URL in a running session launched the same way, and relaunches otherwise", async () => {
+  const browser = fakeBrowser();
+  const opts = { session: "warm", goal: "g" };
+  await runBrowse({ ...opts, url: "http://localhost:4000/" }, { browser, choose: scriptedDriver([["DONE", 0.9]]).choose });
+  assert.equal(browser.log.filter((e) => e[0] === "launch").length, 1);
+
+  const reused = await runBrowse({ ...opts, url: "http://localhost:4000/rooms", reuse: true }, { browser, choose: scriptedDriver([["DONE", 0.9]]).choose });
+  assert.equal(reused.status, "done");
+  assert.equal(reused.url, "http://localhost:4000/rooms");
+  assert.equal(browser.log.filter((e) => e[0] === "launch").length, 1, "no relaunch");
+  assert.ok(browser.log.some((e) => e[0] === "open"));
+  assert.deepEqual(reused.history.map((h) => h.step), [1], "a new goal starts a new history");
+
+  await runBrowse({ ...opts, url: "http://localhost:4000/", reuse: true, allowOrigins: ["https://other.example"] }, { browser, choose: scriptedDriver([["DONE", 0.9]]).choose });
+  assert.equal(browser.log.filter((e) => e[0] === "launch").length, 2, "different settings relaunch");
+
+  await runBrowse({ ...opts, url: "http://localhost:4000/" }, { browser, choose: scriptedDriver([["DONE", 0.9]]).choose });
+  assert.equal(browser.log.filter((e) => e[0] === "launch").length, 3, "without --reuse, always fresh");
 });

@@ -1,9 +1,9 @@
 ---
-name: create-html-artifacts
+name: effective-html
 description: Use when dense planning, review, research, debugging, reporting, design, or handoff work would be easier to understand as a self-contained browser artifact with layout, diagrams, comparisons, controls, tables, timelines, or exportable edits.
 ---
 
-# Create HTML Artifacts
+# Effective HTML
 
 ## Overview
 

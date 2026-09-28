@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { hostsOf } from "./origins.mjs";
 
-const MARK_SUBMITS = fileURLToPath(new URL("./mark-submits.js", import.meta.url));
+const MARK_PAGE = fileURLToPath(new URL("./mark-page.js", import.meta.url));
 
 // agent-browser's own names for the actions strict mode denies. These are
 // the names its policy matches (`evaluate`, not the documented `eval`);
@@ -29,7 +29,7 @@ const PAGE_TEXT_CHARS = 6000;
  * agent-browser refuses to combine with one.
  */
 export function launchFlags({ tier, allowOrigins, policyPath, profile, headed }) {
-  const flags = ["--max-output", String(MAX_OUTPUT), "--init-script", MARK_SUBMITS];
+  const flags = ["--max-output", String(MAX_OUTPUT), "--init-script", MARK_PAGE];
   if (tier === "strict") {
     flags.push("--content-boundaries", "--action-policy", policyPath);
     if (!profile) flags.push("--allowed-domains", hostsOf(allowOrigins).join(","));
@@ -46,11 +46,15 @@ export class BrowserError extends Error {}
 // look like a changed page.
 const withoutBoundaries = (text) => text.split("\n").filter((line) => !/^--- .*AGENT_BROWSER/.test(line)).join("\n");
 
-const PAGE_READS = [["get", "text", "body"], ["snapshot", "-i", "--urls"], ["get", "url"]];
+const OPENSEARCH_LINK = "link[rel=search][type='application/opensearchdescription+xml']";
+const PAGE_READS = [["get", "text", "body"], ["snapshot", "-i", "--urls"], ["get", "url"], ["get", "attr", OPENSEARCH_LINK, "href"]];
 
-function readPage([text, snap, url]) {
+function readPage([text, snap, url, openSearch]) {
   if (!snap?.success) throw new BrowserError(snap?.error ?? "snapshot failed");
   return {
+    // The site's published search description, as written in the page (a
+    // page without one makes this read fail, which is fine).
+    openSearchHref: openSearch?.success ? openSearch.result?.value ?? null : null,
     snapshot: withoutBoundaries(snap.result?.snapshot ?? ""),
     // The interactive snapshot has no prose, and the result a goal asks
     // for is usually prose: without it the Driver can never see `done`.
@@ -113,26 +117,34 @@ export function agentBrowser({ session, bin = process.env.BROWSE_AGENT_BROWSER |
     },
 
     /**
-     * Which of `buttons` would submit a form, and the `type` of each of
-     * `fields` (null where it has none). One call for both.
+     * Which of `buttons` would submit a form; the `type` of each of
+     * `fields` (null where it has none) and which of them are Site search
+     * fields (marked by mark-page.js). One call for all of it.
      */
     attrs(buttons, fields) {
       const results = batch([
         ...buttons.map((ref) => ["get", "attr", `@${ref}`, "data-browse-submits"]),
         ...fields.map((ref) => ["get", "attr", `@${ref}`, "type"]),
+        ...fields.map((ref) => ["get", "attr", `@${ref}`, "data-browse-search"]),
       ]);
       const value = (i) => (results[i]?.success ? results[i].result?.value ?? null : null);
+      const b = buttons.length;
+      const f = fields.length;
       return {
         submits: new Set(buttons.filter((_, i) => value(i) !== null)),
-        types: new Map(fields.map((ref, i) => [ref, value(buttons.length + i)])),
+        types: new Map(fields.map((ref, i) => [ref, value(b + i)])),
+        searchable: new Set(fields.filter((_, i) => value(b + f + i) !== null)),
       };
     },
 
-    /** Perform one action and read the page it leaves, in one call. */
-    act(command) {
-      const [result, ...reads] = batch([command, ...PAGE_READS], true);
-      if (!result?.success) throw new BrowserError(result?.error ?? `${command[0]} failed`);
-      return readPage(reads);
+    /** Perform an action (one or more commands) and read the page it leaves, in one call. */
+    act(commands) {
+      const results = batch([...commands, ...PAGE_READS], true);
+      const failed = results.slice(0, commands.length).find((r) => !r?.success);
+      if (failed || results.length < commands.length + PAGE_READS.length) {
+        throw new BrowserError(failed?.error ?? `${commands[0][0]} failed`);
+      }
+      return readPage(results.slice(commands.length));
     },
   };
 }

@@ -53,6 +53,18 @@ const SCENARIOS = [
     check: (h) => h.status === "consequential" && h.withheld.some((w) => w.includes('"Next"')),
   },
   {
+    name: "strict: a search form that GETs its own origin is a Site search, not a hand-back",
+    opts: { url: `http://0.0.0.0:${port}/search.html`, goal: "Search this site for deluxe rooms and show the results", values: [{ name: "deluxe_rooms_search", text: "deluxe", secret: false }] },
+    check: (h) => h.status === "done" && h.url.includes("/results.html?q=deluxe")
+      && h.history.some((s) => s.action.startsWith("Search for value")),
+  },
+  {
+    name: "strict: a script-driven search uses the site's published template",
+    opts: { url: `http://0.0.0.0:${port}/jssearch.html`, goal: "Search this site for deluxe rooms and show the results", values: [{ name: "deluxe_rooms_search", text: "deluxe", secret: false }] },
+    check: (h) => h.status === "done" && h.url.includes("/results.html?q=deluxe")
+      && h.history.some((s) => s.action.startsWith("Search this site")),
+  },
+  {
     name: "strict: a goal that needs a withheld control hands it back",
     opts: { url: `http://0.0.0.0:${port}/`, goal: "Buy a gift card" },
     check: (h) => h.status === "consequential" && h.withheld.some((w) => w.includes("Buy gift card")),

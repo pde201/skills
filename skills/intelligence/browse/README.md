@@ -19,8 +19,9 @@ export TYPESAFE_API_KEY=...
 
 Each step (`scripts/run.mjs`):
 
-1. Read the page: its visible text, its interactive elements (`snapshot -i --urls`), which buttons would submit a form, and which fields take passwords. Form submits are marked in the page by `scripts/mark-submits.js`, an init script that asks the browser itself (`el.form`, `el.type`); a CSS-scoped snapshot only ever sees a page's first form.
+1. Read the page: its visible text, its interactive elements (`snapshot -i --urls`), which buttons would submit a form, and which fields take passwords. Form submits are marked in the page by `scripts/mark-page.js`, an init script that asks the browser itself (`el.form`, `el.type`); a CSS-scoped snapshot only ever sees a page's first form.
 2. Build the Candidates (`scripts/candidates.mjs`): visible, named, interactive elements, minus duplicates. On an untrusted origin, Consequential controls are withheld: labels like buy, send or delete; controls that submit a form; links to another origin. Named values become `Type value "email" into textbox "Email"`; a Secret value is offered only for a password field on the starting or a trusted origin. At most 255 options, controls included.
+   A **Site search** is offered even on untrusted origins: `Search for value "…" in searchbox "…" and open the results` for a field `mark-page.js` marked (search-like, in a form that GETs this origin), and `Search this site for value "…" and open the results` when the page links an OpenSearch description whose HTML template is a GET on this origin (`scripts/opensearch.mjs`, fetched from Node and cached). Never with a Secret value; the typing floor applies.
 3. Ask Jev one `choice` question (`scripts/driver.mjs`). Option labels are sent unredacted; the page state goes through jev's redaction.
 4. Check the answer: it must carry a confidence and pick its own most probable option; a click needs 0.55, typing 0.75 (`BROWSE_MIN_CONFIDENCE`, `BROWSE_MIN_TYPE_CONFIDENCE`).
 5. Re-read the page. If the chosen element changed or disappeared while Jev decided, or anything new appeared (snapshots do not show dialogs, but an overlay brings controls of its own), choose again. Refs stay bound to one element, so other changes — a clock, a removed banner — do not move the click and do not cost a re-decide.
@@ -41,7 +42,7 @@ npm test          # offline: candidates, the Run loop against a fake browser, th
 npm run eval:live # real agent-browser and Jev on a local fixture site; skips without a key
 ```
 
-The live eval serves `evals/site` on `localhost` (trusted) and `0.0.0.0` (untrusted) and checks four Runs: navigating to a fact; filling a login form and stopping at its submit despite injected page text; withholding the submit button of a page's second form; and handing back a withheld purchase.
+The live eval serves `evals/site` on `localhost` (trusted) and `0.0.0.0` (untrusted) and checks six Runs: navigating to a fact; filling a login form and stopping at its submit despite injected page text; withholding the submit button of a page's second form; a Site search through a GET search form; a Site search through a published OpenSearch template on a script-driven page; and handing back a withheld purchase.
 
 ## Limits
 

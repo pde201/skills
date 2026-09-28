@@ -87,6 +87,8 @@ export function consequentialReason(element, { pageOrigin, submits }) {
  * @param {string} page.origin
  * @param {Set<string>} page.submits    refs of controls that would submit a form
  * @param {Map<string, string|null>} page.types  field ref → its `type` attribute
+ * @param {Set<string>} [page.searchable]  refs of Site search fields
+ * @param {boolean} [page.siteSearch]      the site publishes a usable search template
  * @param {object} opts
  * @param {boolean} opts.trusted          the page's origin is a Trusted origin
  * @param {boolean} opts.secretsAllowed   Secret values may be typed on this origin
@@ -99,12 +101,24 @@ export function buildCandidates(page, { trusted, secretsAllowed, values = [], li
   const withheld = [];
   const actions = [];
   const unfillable = [];
+  const searchable = page.searchable ?? new Set();
+  const plain = values.filter((v) => !v.secret);
+
+  // A Site search is a GET to this origin carrying only the value: never
+  // consequential, never a Secret value (docs: CONTEXT.md, Site search).
+  if (page.siteSearch) {
+    for (const value of plain) {
+      actions.push({ label: `Search this site for value ${quote(value.name)} and open the results`, kind: "sitesearch", value: value.name });
+    }
+  }
 
   for (const element of elements) {
     if (!element.name) continue;
     const isClick = CLICKABLE.has(element.role);
     const isToggle = TOGGLES.has(element.role);
-    const isType = TYPEABLE.has(element.role);
+    const isSearch = searchable.has(element.ref);
+    // A combobox is also a <select>; only a marked search field is typed into.
+    const isType = TYPEABLE.has(element.role) || (element.role === "combobox" && isSearch);
     if (!isClick && !isToggle && !isType) continue;
 
     if (!trusted && (isClick || isToggle)) {
@@ -123,7 +137,19 @@ export function buildCandidates(page, { trusted, secretsAllowed, values = [], li
     } else {
       const password = page.types.get(element.ref) === "password";
       const before = actions.length;
-      for (const value of values) {
+      if (isSearch && !password) {
+        for (const value of plain) {
+          actions.push({
+            label: `Search for value ${quote(value.name)} in ${element.role} ${quote(element.name)} and open the results`,
+            kind: "search",
+            ref: element.ref,
+            value: value.name,
+          });
+        }
+      }
+      // A search field is only ever searched: typing into it without
+      // submitting leads nowhere, and offering both splits the Driver.
+      for (const value of isSearch ? values.filter((v) => v.secret) : values) {
         // A Secret value goes only into a password field, and only where
         // secrets are allowed; an ordinary value never goes into one.
         if (value.secret !== password) continue;

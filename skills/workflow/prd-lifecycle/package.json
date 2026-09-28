@@ -8,7 +8,8 @@
     "README.md"
   ],
   "scripts": {
-    "verify": "bash scripts/verify-prd-closing.sh"
+    "verify": "bash scripts/verify-prd-closing.sh",
+    "test": "node --test test/scripts.test.js"
   },
   "keywords": [
     "agent-skill",

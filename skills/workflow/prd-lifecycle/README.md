@@ -30,3 +30,11 @@ The installer also accepts `--dest DIR` for another skills directory and `--forc
 | `scripts/post-walkthrough.js <prd> [md] [--close]` | Post the walkthrough as a comment on the PRD, and close it only with `--close` |
 
 The verify script detects `npm run typecheck`, `npx tsc --noEmit` and `npm test`. For other projects, pass the commands as flags or set `PRD_CHECK_DIR`, `PRD_TYPECHECK_CMD` and `PRD_TEST_CMD`.
+
+## Tests
+
+```bash
+npm test
+```
+
+Runs offline against a stub `gh`; needs `git`, `bash` and `jq`.

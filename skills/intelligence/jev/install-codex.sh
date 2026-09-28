@@ -28,13 +28,11 @@ warn(){ printf "  \033[33m!\033[0m %s\n" "$*"; }
 command -v jq   >/dev/null || { warn "jq is required"; exit 1; }
 command -v node >/dev/null || { warn "node is required"; exit 1; }
 
-# The hooks need built-in fetch (Node 18+); the tests and evals need 22+.
+# The hooks, tests and evals need built-in fetch (Node 18+).
 NODE_MAJOR="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || echo 0)"
 if [ "$NODE_MAJOR" -lt 18 ]; then
-  warn "node $NODE_MAJOR is too old — the hooks need Node 18+, the tests and evals Node 22+"
+  warn "node $NODE_MAJOR is too old — Jev needs Node 18+"
   exit 1
-elif [ "$NODE_MAJOR" -lt 22 ]; then
-  warn "node $NODE_MAJOR runs the hooks; npm test and the evals need Node 22+"
 fi
 
 # Hooks are registered by absolute path. A copy in a temp directory works

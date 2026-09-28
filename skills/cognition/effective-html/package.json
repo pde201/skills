@@ -1,6 +1,6 @@
 {
   "name": "@acuity-skills/effective-html",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Agent skill: turn dense work into self-contained, interactive HTML artifacts.",
   "files": [
     "effective-html/",

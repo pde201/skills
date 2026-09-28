@@ -8,9 +8,12 @@ const path = require("path");
 function usage() {
   console.log(`Install the Acuity ssd skill.
 
-Usage:
-  npx --yes github:pde201/skills/skills/intelligence/ssd [codex|claude] [--force]
-  npx --yes github:pde201/skills/skills/intelligence/ssd --dest /path/to/skills-dir [--force]
+Usage (npm's npx cannot install from a git subdirectory, so fetch via a
+sparse clone instead of "npx github:..."):
+  git clone --filter=blob:none --sparse --depth 1 https://github.com/pde201/skills.git /tmp/ssd-install
+  git -C /tmp/ssd-install sparse-checkout set skills/intelligence/ssd
+  node /tmp/ssd-install/skills/intelligence/ssd/bin/install.js [codex|claude] [--force]
+  node /tmp/ssd-install/skills/intelligence/ssd/bin/install.js --dest /path/to/skills-dir [--force]
 
 Targets:
   codex   Install to \${CODEX_HOME:-$HOME/.codex}/skills
@@ -99,7 +102,7 @@ function main() {
     console.error(`error: ${destDir} already exists
 
 Run with --force to replace it:
-  npx --yes github:pde201/skills/skills/intelligence/ssd ${options.target} --force`);
+  node ${__filename} ${options.destBase ? `--dest "${options.destBase}"` : options.target} --force`);
     process.exit(1);
   }
 

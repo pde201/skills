@@ -29,14 +29,14 @@ With the [skills.sh](https://skills.sh) CLI (drop `--global` for a project-local
 npx --yes skills add pde201/skills --skill ssd --global --agent claude-code --yes   # or --agent codex
 ```
 
-Or with this package's own installer:
+Or from a clone, with the skill's own installer (`codex|claude`, default `codex`):
 
 ```bash
-npx --yes github:pde201/skills/skills/intelligence/ssd          # ${CODEX_HOME:-$HOME/.codex}/skills (default)
-npx --yes github:pde201/skills/skills/intelligence/ssd claude   # ${CLAUDE_HOME:-$HOME/.claude}/skills
+git clone https://github.com/pde201/skills.git
+./skills/skills/intelligence/ssd/install.sh claude
 ```
 
-From a clone, `./install.sh` takes the same targets. Both installers accept `--dest DIR` for another skills directory and `--force` to replace an existing install. Each creates an `ssd/` directory inside the chosen skills directory.
+The installer also accepts `--dest DIR` for another skills directory and `--force` to replace an existing install. It creates an `ssd/` directory inside the chosen skills directory.
 
 Restart your agent after installing so it can discover the new skill.
 

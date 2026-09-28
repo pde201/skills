@@ -18,7 +18,7 @@ Improve agent reasoning speeds, spend less of the context window, minimize plann
 
 ### 📂 cognition
 Help agents visually communicate ideas, layouts, and illustrations (charts, specs, interactive HTML artifacts, hand-drawn figures) to humans.
-* **[effective-html](./skills/cognition/effective-html/effective-html/SKILL.md)**: Generate responsive, interactive, and self-contained HTML browser artifacts for plans, spec plans, and custom visualizations.
+* **[effective-html](./skills/cognition/effective-html/effective-html/SKILL.md)**: Turn dense engineering work (plans, reviews, debugging traces, explainers, tuners) into one self-contained HTML file, with a template, recipes and a checker script.
   * **Install**: `npx --yes skills add pde201/skills --skill effective-html --global`
 * **[xiaohei-illustrations](./skills/cognition/xiaohei-illustrations/SKILL.md)**: Generate quirky, hand-drawn "Xiaohei" explanatory illustrations (16:9, pure-white, sparse English labels) for articles, blog posts, and docs.
   * **Install**: `npx --yes skills add pde201/skills --skill xiaohei-illustrations --global`
@@ -33,12 +33,12 @@ To see every skill in this repo:
 npx --yes skills add pde201/skills --list
 ```
 
-Without the skills CLI, clone the repo and run a skill's own installer:
+Without the skills CLI, clone the repo and run its installer with the skill's name (`./install.sh --list` shows them; jev has its own, see its README):
 ```bash
 git clone https://github.com/pde201/skills.git
-./skills/skills/workflow/prd-lifecycle/install.sh claude    # or codex; --force replaces an existing install
+./skills/install.sh prd-lifecycle claude    # or codex, or agents (the default); --force replaces an existing install
 ```
 
-`npx github:pde201/skills/...` does not work: npm cannot install a package from a subdirectory of a git repository.
+Installing with `npx` and a `github:` path into this repo does not work: npm cannot install a package from a subdirectory of a git repository.
 
 Restart your agent after installation to discover the new skill.

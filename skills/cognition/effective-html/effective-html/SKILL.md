@@ -1,6 +1,6 @@
 ---
 name: effective-html
-description: Use when dense planning, review, research, debugging, reporting, design, or handoff work would be easier to understand as a self-contained browser artifact with layout, diagrams, comparisons, controls, tables, timelines, or exportable edits.
+description: Turn dense engineering work into one self-contained HTML file when layout carries the meaning — implementation and migration plans, code reviews and debugging boards, architecture or research explainers, incident reports, design sheets, decision briefs, lightweight decks, and prompt or config tuners that export Markdown, JSON or prompts. Bundles an artifact picker, a starter template, HTML/CSS/JS recipes and a checker script (scripts/check-html-artifact.py). Use when a plan, review, trace or comparison would be easier to scan with side-by-side layout, diagrams, tables, timelines or controls than as Markdown. Not for mostly linear prose, which should stay Markdown.
 ---
 
 # Effective HTML

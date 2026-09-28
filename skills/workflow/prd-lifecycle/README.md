@@ -12,11 +12,11 @@ With the [skills.sh](https://skills.sh) CLI (add `--agent claude-code` or `--age
 npx --yes skills add pde201/skills --skill prd-lifecycle --global --yes
 ```
 
-Or from a clone, with the skill's own installer (`agents|codex|claude`, default `agents`):
+Or from a clone, with the repository's installer (targets `agents`, `codex` or `claude`; default `agents`):
 
 ```bash
 git clone https://github.com/pde201/skills.git
-./skills/skills/workflow/prd-lifecycle/install.sh claude
+./skills/install.sh prd-lifecycle claude
 ```
 
 The installer also accepts `--dest DIR` for another skills directory and `--force` to replace an existing install; run it with `--help` for details.
@@ -30,3 +30,11 @@ The installer also accepts `--dest DIR` for another skills directory and `--forc
 | `scripts/post-walkthrough.js <prd> [md] [--close]` | Post the walkthrough as a comment on the PRD, and close it only with `--close` |
 
 The verify script detects `npm run typecheck`, `npx tsc --noEmit` and `npm test`. For other projects, pass the commands as flags or set `PRD_CHECK_DIR`, `PRD_TYPECHECK_CMD` and `PRD_TEST_CMD`.
+
+## Tests
+
+```bash
+npm test
+```
+
+Runs offline against a stub `gh`; needs `git`, `bash` and `jq`.

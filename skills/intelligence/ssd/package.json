@@ -1,17 +1,12 @@
 {
   "name": "@acuity-skills/ssd",
   "version": "1.0.0",
-  "description": "Install the ssd agent skill for Codex, Claude Code, or another skills directory.",
-  "bin": {
-    "acuity-ssd": "bin/install.js"
-  },
+  "description": "Agent skill: one-step speculative branching to hide planning latency in multi-step plans.",
   "files": [
-    "bin/",
     "references/",
     "scripts/",
     "SKILL.md",
-    "README.md",
-    "install.sh"
+    "README.md"
   ],
   "engines": {
     "node": ">=16"

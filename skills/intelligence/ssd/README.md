@@ -29,11 +29,11 @@ With the [skills.sh](https://skills.sh) CLI (drop `--global` for a project-local
 npx --yes skills add pde201/skills --skill ssd --global --agent claude-code --yes   # or --agent codex
 ```
 
-Or from a clone, with the skill's own installer (`codex|claude`, default `codex`):
+Or from a clone, with the repository's installer (targets `agents`, `codex` or `claude`; default `agents`):
 
 ```bash
 git clone https://github.com/pde201/skills.git
-./skills/skills/intelligence/ssd/install.sh claude
+./skills/install.sh ssd claude
 ```
 
 The installer also accepts `--dest DIR` for another skills directory and `--force` to replace an existing install. It creates an `ssd/` directory inside the chosen skills directory.
@@ -66,9 +66,7 @@ Use $ssd to decide whether speculative branching is worthwhile for this multi-st
 .
 +-- SKILL.md
 +-- README.md
-+-- install.sh
 +-- package.json
-+-- bin/install.js
 +-- scripts/ssd-tracker.js
 `-- references/
     |-- drafter-backends.md

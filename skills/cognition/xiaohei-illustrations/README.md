@@ -34,9 +34,8 @@ npx --yes skills add pde201/skills --skill xiaohei-illustrations --global --agen
 ## Clone-Based Install
 
 ```bash
-gh repo clone pde201/skills
-cd skills/skills/cognition/xiaohei-illustrations
-./install.sh claude        # or: ./install.sh codex
+git clone https://github.com/pde201/skills.git
+./skills/install.sh xiaohei-illustrations claude   # or codex, or agents (the default)
 ```
 
 Installs to `${CLAUDE_HOME:-$HOME/.claude}/skills/xiaohei-illustrations` (or the Codex equivalent). Restart your agent afterward so it can discover the skill.
@@ -71,9 +70,7 @@ Generate 4 Xiaohei illustrations for the article below.
 +-- README.md
 +-- NOTICE.md
 +-- LICENSE
-+-- install.sh
 +-- package.json
-+-- bin/install.js
 +-- references/
 |   +-- style-dna.md
 |   +-- character.md

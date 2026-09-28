@@ -1,17 +1,12 @@
 {
   "name": "@acuity-skills/xiaohei-illustrations",
   "version": "1.0.0",
-  "description": "Install the xiaohei-illustrations agent skill for Codex, Claude Code, or another skills directory.",
-  "bin": {
-    "acuity-xiaohei-illustrations": "bin/install.js"
-  },
+  "description": "Agent skill: hand-drawn \"Xiaohei\" explanatory illustrations for articles, posts and docs.",
   "files": [
-    "bin/",
     "references/",
     "examples/",
     "SKILL.md",
     "README.md",
-    "install.sh",
     "LICENSE",
     "NOTICE.md"
   ],

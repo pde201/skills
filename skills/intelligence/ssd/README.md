@@ -21,121 +21,24 @@ It helps agents:
 - classify cache hits, misses, and partial reuse honestly
 - disable speculation when the economics stop working
 
-## Recommended Install With skills.sh
+## Install
 
-The easiest path is the `skills` CLI from [skills.sh](https://skills.sh):
-
-```bash
-npx --yes skills add pde201/ssd \
-  --skill ssd \
-  --global \
-  --agent codex \
-  --yes
-```
-
-For Claude Code:
+With the [skills.sh](https://skills.sh) CLI (drop `--global` for a project-local install):
 
 ```bash
-npx --yes skills add pde201/ssd \
-  --skill ssd \
-  --global \
-  --agent claude-code \
-  --yes
+npx --yes skills add pde201/skills --skill ssd --global --agent claude-code --yes   # or --agent codex
 ```
 
-To preview what the repo exposes before installing:
+Or with this package's own installer:
 
 ```bash
-npx --yes skills add pde201/ssd --list
+npx --yes github:pde201/skills/skills/intelligence/ssd          # ${CODEX_HOME:-$HOME/.codex}/skills (default)
+npx --yes github:pde201/skills/skills/intelligence/ssd claude   # ${CLAUDE_HOME:-$HOME/.claude}/skills
 ```
 
-For a project-local install, omit `--global`.
-
-## Direct npx Install
-
-You can also install directly from this GitHub repo:
-
-```bash
-npx --yes github:pde201/ssd codex
-```
-
-For Claude Code:
-
-```bash
-npx --yes github:pde201/ssd claude
-```
-
-For a custom skills directory:
-
-```bash
-npx --yes github:pde201/ssd --dest "$HOME/.agents/skills"
-```
-
-If you already have the skill installed, add `--force`:
-
-```bash
-npx --yes github:pde201/ssd codex --force
-```
-
-## Clone-Based Install
-
-Clone the repo, then run the installer for your agent:
-
-```bash
-gh repo clone pde201/ssd
-cd ssd
-./install.sh codex
-```
+From a clone, `./install.sh` takes the same targets. Both installers accept `--dest DIR` for another skills directory and `--force` to replace an existing install. Each creates an `ssd/` directory inside the chosen skills directory.
 
 Restart your agent after installing so it can discover the new skill.
-
-## Install Targets
-
-### Codex
-
-```bash
-./install.sh codex
-```
-
-Installs to:
-
-```text
-${CODEX_HOME:-$HOME/.codex}/skills/ssd
-```
-
-### Claude Code
-
-```bash
-./install.sh claude
-```
-
-Installs to:
-
-```text
-${CLAUDE_HOME:-$HOME/.claude}/skills/ssd
-```
-
-### Generic Agent Directory
-
-Use `--dest` when your agent reads skills from a different folder:
-
-```bash
-./install.sh --dest "$HOME/.agents/skills"
-```
-
-That creates:
-
-```text
-$HOME/.agents/skills/ssd
-```
-
-### Overwrite an Existing Install
-
-The installer refuses to overwrite by default. To replace an existing copy:
-
-```bash
-./install.sh codex --force
-```
 
 ## Verify Installation
 
@@ -166,6 +69,7 @@ Use $ssd to decide whether speculative branching is worthwhile for this multi-st
 +-- install.sh
 +-- package.json
 +-- bin/install.js
++-- scripts/ssd-tracker.js
 `-- references/
     |-- drafter-backends.md
     |-- evals.md
@@ -178,4 +82,4 @@ Use $ssd to decide whether speculative branching is worthwhile for this multi-st
 
 - The skill is advisory. The executor remains authoritative for real workspace state and verification.
 - The skill deliberately limits speculation to one step of lookahead.
-- `npx skills add pde201/ssd --list` should show exactly one skill: `ssd`.
+- `npx skills add pde201/skills --list` lists this skill as `ssd`.

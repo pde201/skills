@@ -1,9 +1,9 @@
 ---
 name: ssd
-description: Use when a multi-step implementation plan has a slow current step, a few likely next-step outcomes, and you need to decide whether one-step speculative branching can hide planning latency without causing oversized drafts.
+description: Speculative branching for multi-step implementation plans. While a slow step runs (a long build, test suite, deploy or verification), draft small patch sketches for its few likely outcomes so the next step can start as soon as the result is known. Use when working through a plan of 3 or more sequential steps where the current step leaves a real wait, when asked to overlap planning with execution or hide planning latency, or when checking whether speculation is paying off. Not for single-step tasks, next steps that need broad rewrites, or outcomes that cannot be predicted.
 ---
 
-# Speculative Decoding
+# SSD: Speculative Branching for Multi-Step Plans
 
 ## Overview
 

@@ -1,6 +1,6 @@
 # Skill Evals
 
-Use these scenarios to pressure-test the speculative-decoding skill.
+Use these scenarios to pressure-test the ssd skill.
 
 Per `writing-skills`, run RED first:
 - test the scenario **without** loading this skill

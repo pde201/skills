@@ -1,4 +1,4 @@
-# Speculative Decoding Runtime Matrix
+# SSD Runtime Matrix
 
 Use explicit runtime roles. This protocol always has three named roles:
 - primary drafter: builds the initial branch-skeleton cache for step N+1

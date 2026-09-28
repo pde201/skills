@@ -1,4 +1,4 @@
-# Speculative Decoding Prompt Templates
+# SSD Prompt Templates
 
 These are prompt bodies. Pair them with the runtime roles from [Drafter Backends](drafter-backends.md) and the cache semantics from [Outcome Cache](outcome-cache.md).
 

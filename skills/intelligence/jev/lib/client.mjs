@@ -122,6 +122,9 @@ export const noul = (instructions, criteria) =>
 
 export const choice = (instructions, criteria) => ({ type: "choice", instructions, criteria });
 
+/** The API's limit on options in one choice question. */
+export const MAX_CHOICE_OPTIONS = 255;
+
 export const score = (instructions, criteria) => ({ type: "score", instructions, criteria });
 
 // ── The one call ─────────────────────────────────────────────────────
@@ -139,6 +142,9 @@ export const score = (instructions, criteria) => ({ type: "score", instructions,
  * @param {string}  [opts.model]
  * @param {number}  [opts.timeoutMs]
  * @param {number}  [opts.retries]  retries on timeout / 5xx / 429 only
+ * @param {boolean} [opts.redactOptions]  false sends choice option text as
+ *   given. State and instructions are still redacted. For callers whose
+ *   options are labels that redaction would make indistinguishable.
  * @returns {Promise<{model: string, answers: object, usage: object}>}
  */
 export async function systemOne({
@@ -147,6 +153,7 @@ export async function systemOne({
   model = DEFAULT_MODEL,
   timeoutMs = Number(process.env.JEV_TIMEOUT_MS || 4000),
   retries = Number(process.env.JEV_RETRIES || 1),
+  redactOptions = true,
 } = {}) {
   if (!questions || Object.keys(questions).length === 0) {
     return { model, answers: {}, usage: { input_tokens: 0, output_tokens: 0 } };
@@ -165,7 +172,7 @@ export async function systemOne({
   try {
     // State and question instructions can contain tool input or free text.
     // Keep the original values local, and send only the redacted copy.
-    body = JSON.stringify({ state: redactState(state), model, questions: redactState(questions) });
+    body = JSON.stringify({ state: redactState(state), model, questions: redactQuestions(questions, redactOptions) });
   } catch (err) {
     throw new JevUnavailable("TypeSafe request could not be serialized", err);
   }
@@ -236,6 +243,15 @@ export async function systemOne({
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function redactQuestions(questions, redactOptions) {
+  const redacted = redactState(questions);
+  if (redactOptions) return redacted;
+  for (const [id, question] of Object.entries(questions)) {
+    if (question?.type === "choice") redacted[id] = { ...redacted[id], criteria: question.criteria };
+  }
+  return redacted;
+}
 
 // ── Answer accessors ─────────────────────────────────────────────────
 // Answers are typed; reading the wrong field silently yields undefined,
@@ -341,6 +357,20 @@ export function pickChoice(response, id) {
   const a = response.answers?.[id];
   if (!a || a.type !== "choice") return null;
   return { choice: a.choice, confidence: a.confidence ?? 0, probabilities: a.probabilities ?? {} };
+}
+
+/**
+ * pickChoice for callers that act on the answer: null unless the answer
+ * carries a confidence and its choice is the most probable option. A
+ * response can pass validation and still disagree with itself, and an
+ * action taken on that disagreement cannot be undone.
+ */
+export function pickChoiceStrict(response, id) {
+  const a = response.answers?.[id];
+  if (!a || a.type !== "choice" || typeof a.confidence !== "number") return null;
+  const top = Math.max(...Object.values(a.probabilities ?? {}));
+  if (!((a.probabilities?.[a.choice] ?? -1) >= top - 1e-9)) return null;
+  return { choice: a.choice, confidence: a.confidence, probabilities: a.probabilities };
 }
 
 export function pickScore(response, id) {

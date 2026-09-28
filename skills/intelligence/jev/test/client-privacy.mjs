@@ -350,3 +350,37 @@ test("decision logs are redacted and private", () => {
   assert.equal(statSync(stateDir()).mode & 0o777, 0o700);
   assert.equal(statSync(path).mode & 0o777, 0o600);
 });
+
+test("redactOptions false sends choice option text as given and still redacts state and instructions", async () => {
+  const { MAX_CHOICE_OPTIONS } = await import("../lib/client.mjs");
+  assert.equal(MAX_CHOICE_OPTIONS, 255);
+  let sent;
+  const criteria = { a0: 'Click link "Order 123456789"', a1: 'Click link "Order 987654321"' };
+  installMock(
+    { model: "jev-test", answers: { next: { type: "choice", choice: "a0", probabilities: { a0: 0.9, a1: 0.1 }, confidence: 0.9 } }, usage: {} },
+    (_url, options) => { sent = JSON.parse(options.body); },
+  );
+  await systemOne({
+    state: { page: "account 123456789" },
+    questions: { next: choice("Pick the order 123456789", criteria) },
+    redactOptions: false,
+  });
+  assert.deepEqual(sent.questions.next.criteria, criteria);
+  assert.doesNotMatch(sent.questions.next.instructions, /123456789/);
+  assert.doesNotMatch(sent.state.page, /123456789/);
+
+  await systemOne({ state: {}, questions: { next: choice("Pick", criteria) } });
+  assert.doesNotMatch(JSON.stringify(sent.questions.next.criteria), /123456789/);
+});
+
+test("pickChoiceStrict needs a confidence and the most probable option", async () => {
+  const { pickChoiceStrict } = await import("../lib/client.mjs");
+  const answer = (fields) => ({ answers: { next: { type: "choice", ...fields } } });
+  assert.deepEqual(
+    pickChoiceStrict(answer({ choice: "a", probabilities: { a: 0.7, b: 0.3 }, confidence: 0.7 }), "next"),
+    { choice: "a", confidence: 0.7, probabilities: { a: 0.7, b: 0.3 } },
+  );
+  assert.equal(pickChoiceStrict(answer({ choice: "a", probabilities: { a: 0.7, b: 0.3 } }), "next"), null);
+  assert.equal(pickChoiceStrict(answer({ choice: "b", probabilities: { a: 0.7, b: 0.3 }, confidence: 0.9 }), "next"), null);
+  assert.equal(pickChoiceStrict({ answers: {} }, "next"), null);
+});

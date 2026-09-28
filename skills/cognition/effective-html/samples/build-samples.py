@@ -136,7 +136,7 @@ function buildPrompt(state) {
     "Run check-html-artifact.py.",
   ];
   return [
-    "Use create-html-artifacts (effective-html).",
+    "Use effective-html.",
     "",
     `Create HTML ${state.artifactType} for: ${state.topic || "[topic required]"}`,
     "",
@@ -159,7 +159,7 @@ function renderPromptEditor() {
   ].map((label) => `<span class="chip">${label}</span>`).join("");
   els.prompt.textContent = buildPrompt(state);
   els.json.textContent = JSON.stringify(
-    { skill: "create-html-artifacts", ...state, inlineOnly: state.noCdn },
+    { skill: "effective-html", ...state, inlineOnly: state.noCdn },
     null,
     2,
   );
@@ -211,11 +211,11 @@ SAMPLES = {
 <header>
 <p class="eyebrow">Acuity cognition · sample</p>
 <h1>Effective HTML Skill Overview</h1>
-<p class="lede"><strong>TL;DR:</strong> Package <code>effective-html</code> ships skill <code>create-html-artifacts</code> — single-file browser artifacts when layout beats Markdown.</p>
+<p class="lede"><strong>TL;DR:</strong> Skill <code>effective-html</code> makes single-file browser artifacts when layout beats Markdown.</p>
 </header>
 <section class="summary" aria-label="Summary">
-<div class="cell"><div class="k">Package</div><div class="v">effective-html</div></div>
-<div class="cell"><div class="k">Skill</div><div class="v accent">create-html-artifacts</div></div>
+<div class="cell"><div class="k">Package</div><div class="v">@acuity-skills/effective-html</div></div>
+<div class="cell"><div class="k">Skill</div><div class="v accent">effective-html</div></div>
 <div class="cell"><div class="k">Category</div><div class="v">Cognition</div></div>
 <div class="cell"><div class="k">Output</div><div class="v">One .html</div></div>
 </section>
@@ -273,10 +273,10 @@ SAMPLES = {
 </section>
 <section>
 <details><summary>Sources</summary>
-<ul class="muted" style="margin-top:6px;padding-left:18px"><li><code>create-html-artifacts/SKILL.md</code></li><li><a href="https://thariqs.github.io/html-effectiveness/">HTML Effectiveness gallery</a></li></ul>
+<ul class="muted" style="margin-top:6px;padding-left:18px"><li><code>effective-html/SKILL.md</code></li><li><a href="https://thariqs.github.io/html-effectiveness/">HTML Effectiveness gallery</a></li></ul>
 </details>
 <div class="toolbar"><button class="btn" type="button" data-copy="#handoff">Copy handoff</button><button class="btn ghost" type="button" onclick="window.print()">Print</button></div>
-<pre class="soft" id="handoff">Use create-html-artifacts when layout improves cognition. Install: npx --yes github:pde201/skills/skills/cognition/effective-html</pre>
+<pre class="soft" id="handoff">Use effective-html when layout improves cognition. Install: npx --yes github:pde201/skills/skills/cognition/effective-html</pre>
 </section>
 </main>""",
     ),

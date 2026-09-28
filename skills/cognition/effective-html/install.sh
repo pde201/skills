@@ -3,7 +3,7 @@ set -euo pipefail
 
 usage() {
   cat <<'USAGE'
-Install the create-html-artifacts skill.
+Install the effective-html skill.
 
 Usage:
   ./install.sh [agents|codex|claude] [--force]
@@ -16,7 +16,7 @@ Targets:
 
 Options:
   --dest DIR  Install into a custom skills directory
-  --force     Replace an existing create-html-artifacts install
+  --force     Replace an existing effective-html install
   -h, --help  Show this help
 USAGE
 }
@@ -56,7 +56,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source_dir="$script_dir/create-html-artifacts"
+source_dir="$script_dir/effective-html"
 
 if [[ ! -f "$source_dir/SKILL.md" ]]; then
   echo "error: cannot find skill source at $source_dir" >&2
@@ -77,8 +77,8 @@ if [[ -z "$dest_base" ]]; then
   esac
 fi
 
-dest_dir="$dest_base/create-html-artifacts"
-tmp_dir="$dest_base/.create-html-artifacts.tmp.$$"
+dest_dir="$dest_base/effective-html"
+tmp_dir="$dest_base/.effective-html.tmp.$$"
 
 if [[ -e "$dest_dir" && "$force" != "1" ]]; then
   cat >&2 <<EOF
@@ -100,7 +100,16 @@ if [[ -e "$dest_dir" ]]; then
 fi
 mv "$tmp_dir" "$dest_dir"
 
-echo "Installed create-html-artifacts to:"
+echo "Installed effective-html to:"
 echo "  $dest_dir"
 echo
 echo "Restart your agent to pick up the new skill."
+
+legacy_dir="$dest_base/create-html-artifacts"
+if [[ -f "$legacy_dir/SKILL.md" ]]; then
+  echo
+  echo "note: this skill was previously named create-html-artifacts. The old copy"
+  echo "is still at $legacy_dir and will load alongside"
+  echo "this one; remove it once you no longer need it:"
+  echo "  rm -rf \"$legacy_dir\""
+fi

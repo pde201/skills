@@ -1,6 +1,4 @@
-# Create HTML Artifacts
-
-[![skills.sh](https://skills.sh/b/pde201/create-html-artifacts-skill)](https://skills.sh/pde201/create-html-artifacts-skill)
+# Effective HTML
 
 A portable skill for any agent that understands `SKILL.md`-style skills, turning dense work into self-contained browser artifacts.
 
@@ -8,9 +6,9 @@ Use it when a spec, plan, review, research note, incident report, design sheet, 
 
 ## What This Skill Does
 
-`create-html-artifacts` helps an agent decide when HTML is the right medium and then produce a polished, self-contained artifact. The skill includes:
+`effective-html` helps an agent decide when HTML is the right medium and then produce a polished, self-contained artifact. The skill includes:
 
-- a concise workflow in [`SKILL.md`](create-html-artifacts/SKILL.md)
+- a concise workflow in [`SKILL.md`](effective-html/SKILL.md)
 - an artifact picker for choosing the right format
 - reusable HTML/CSS/JS recipes
 - a starter `base.html` template
@@ -40,7 +38,7 @@ Reference HTML files live in [`samples/`](samples/). Theme follows the [HTML Eff
 Validate all samples:
 
 ```bash
-python3 create-html-artifacts/scripts/check-html-artifact.py samples/*.html
+for f in samples/*.html; do python3 effective-html/scripts/check-html-artifact.py "$f"; done
 ```
 
 Regenerate samples after editing `samples/he-dense-theme.css` or `samples/build-samples.py`:
@@ -50,186 +48,40 @@ python3 samples/build-samples.py
 python3 samples/build-samples.py --check   # CI: fail if HTML is stale
 ```
 
-## Recommended Install With skills.sh
+## Install
 
-The easiest path is the `skills` CLI from [skills.sh](https://skills.sh). This installs the `create-html-artifacts` skill globally for your detected agent environment:
-
-```bash
-npx --yes skills add pde201/create-html-artifacts-skill \
-  --skill create-html-artifacts \
-  --global \
-  --yes
-```
-
-To install for a specific agent, pass `--agent`. Codex:
+With the [skills.sh](https://skills.sh) CLI, which installs for your detected agent (add `--agent codex` or `--agent claude-code` to choose one, or drop `--global` for a project-local install):
 
 ```bash
-npx --yes skills add pde201/create-html-artifacts-skill \
-  --skill create-html-artifacts \
-  --global \
-  --agent codex \
-  --yes
+npx --yes skills add pde201/skills --skill effective-html --global --yes
 ```
 
-Claude Code:
+Or with this package's own installer:
 
 ```bash
-npx --yes skills add pde201/create-html-artifacts-skill \
-  --skill create-html-artifacts \
-  --global \
-  --agent claude-code \
-  --yes
+npx --yes github:pde201/skills/skills/cognition/effective-html          # ${AGENTS_HOME:-$HOME/.agents}/skills
+npx --yes github:pde201/skills/skills/cognition/effective-html codex    # ${CODEX_HOME:-$HOME/.codex}/skills
+npx --yes github:pde201/skills/skills/cognition/effective-html claude   # ${CLAUDE_HOME:-$HOME/.claude}/skills
 ```
 
-To preview what the repo exposes before installing:
+From a clone, `./install.sh` takes the same targets. Both installers accept `--dest DIR` for another skills directory and `--force` to replace an existing install. Each creates an `effective-html/` directory inside the chosen skills directory.
 
-```bash
-npx --yes skills add pde201/create-html-artifacts-skill --list
-```
-
-For a project-local install, omit `--global`.
-
-The repo is public, so these commands work without GitHub authentication. The `skills` CLI supports multiple agents and can install this skill wherever that agent expects skills.
-
-## Direct npx Install
-
-If you prefer to skip the `skills` CLI, this repo also exposes a direct GitHub `npx` installer:
-
-```bash
-npx --yes github:pde201/create-html-artifacts-skill
-```
-
-By default, the direct installer writes to a generic skills directory:
+Restart the agent after installing, then invoke it with:
 
 ```text
-${AGENTS_HOME:-$HOME/.agents}/skills/create-html-artifacts
+Use $effective-html to turn this implementation plan into a self-contained HTML artifact.
 ```
 
-Agent-specific shortcuts are also available:
+### Upgrading from create-html-artifacts
 
-```bash
-npx --yes github:pde201/create-html-artifacts-skill codex
-npx --yes github:pde201/create-html-artifacts-skill claude
-```
-
-For a custom skills directory:
-
-```bash
-npx --yes github:pde201/create-html-artifacts-skill --dest "$HOME/.agents/skills"
-```
-
-If you already have the skill installed, add `--force`:
-
-```bash
-npx --yes github:pde201/create-html-artifacts-skill --force
-```
-
-The direct installer copies the skill into the selected agent's global skills directory. Use the skills.sh installer above when you want ecosystem-friendly install tracking and multi-agent support.
-
-## Clone-Based Install
-
-Clone the repo, then run the installer for your agent:
-
-```bash
-gh repo clone pde201/create-html-artifacts-skill
-cd create-html-artifacts-skill
-./install.sh
-```
-
-Restart your agent after installing so it can discover the new skill.
-
-## Install Targets
-
-### Generic Agent Directory
-
-```bash
-./install.sh
-```
-
-Installs to:
-
-```text
-${AGENTS_HOME:-$HOME/.agents}/skills/create-html-artifacts
-```
-
-### Codex
-
-```bash
-./install.sh codex
-```
-
-Installs to:
-
-```text
-${CODEX_HOME:-$HOME/.codex}/skills/create-html-artifacts
-```
-
-### Claude Code
-
-```bash
-./install.sh claude
-```
-
-Installs to:
-
-```text
-${CLAUDE_HOME:-$HOME/.claude}/skills/create-html-artifacts
-```
-
-### Custom Skills Directory
-
-Use `--dest` when your agent reads skills from another folder:
-
-```bash
-./install.sh --dest "$HOME/.agents/skills"
-```
-
-That creates:
-
-```text
-$HOME/.agents/skills/create-html-artifacts
-```
-
-### Overwrite an Existing Install
-
-The installer refuses to overwrite by default. To replace an existing copy:
-
-```bash
-./install.sh --force
-```
-
-## Verify Installation
-
-After a generic install, confirm the skill exists:
-
-```bash
-ls "${AGENTS_HOME:-$HOME/.agents}/skills/create-html-artifacts/SKILL.md"
-```
-
-For Codex:
-
-```bash
-ls "${CODEX_HOME:-$HOME/.codex}/skills/create-html-artifacts/SKILL.md"
-```
-
-For Claude Code:
-
-```bash
-ls "${CLAUDE_HOME:-$HOME/.claude}/skills/create-html-artifacts/SKILL.md"
-```
-
-Then restart the agent and invoke it with:
-
-```text
-Use $create-html-artifacts to turn this implementation plan into a self-contained HTML artifact.
-```
+Before 2.0 this skill was named `effective-html` and installed into a directory of that name. Installing 2.0 leaves the old copy in place, and the installer prints its path; remove it so the two do not load side by side.
 
 ## Using the HTML Checker
 
 The skill ships with a small validation helper:
 
 ```bash
-create-html-artifacts/scripts/check-html-artifact.py path/to/artifact.html
+effective-html/scripts/check-html-artifact.py path/to/artifact.html
 ```
 
 It checks for common issues such as a missing title, missing viewport tag, external dependencies, missing landmarks, unlabeled controls, and stale placeholders.
@@ -252,7 +104,9 @@ The installed skill directory contains:
 +-- package.json
 +-- bin/install.js
 +-- README.md
-`-- create-html-artifacts/
++-- evals/evals.json
++-- samples/            (reference artifacts and their generator)
+`-- effective-html/
     |-- SKILL.md
     |-- agents/openai.yaml
     |-- assets/templates/base.html

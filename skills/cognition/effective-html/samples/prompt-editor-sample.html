@@ -554,7 +554,7 @@ function buildPrompt(state) {
     "Run check-html-artifact.py.",
   ];
   return [
-    "Use create-html-artifacts (effective-html).",
+    "Use effective-html.",
     "",
     `Create HTML ${state.artifactType} for: ${state.topic || "[topic required]"}`,
     "",
@@ -577,7 +577,7 @@ function renderPromptEditor() {
   ].map((label) => `<span class="chip">${label}</span>`).join("");
   els.prompt.textContent = buildPrompt(state);
   els.json.textContent = JSON.stringify(
-    { skill: "create-html-artifacts", ...state, inlineOnly: state.noCdn },
+    { skill: "effective-html", ...state, inlineOnly: state.noCdn },
     null,
     2,
   );

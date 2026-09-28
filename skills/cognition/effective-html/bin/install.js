@@ -19,7 +19,7 @@ Targets:
 
 Options:
   --dest DIR  Install into a custom skills directory
-  --force     Replace an existing create-html-artifacts install
+  --force     Replace an existing effective-html install
   -h, --help  Show this help`);
 }
 
@@ -89,15 +89,15 @@ function main() {
   }
 
   const repoRoot = path.resolve(__dirname, "..");
-  const sourceDir = path.join(repoRoot, "create-html-artifacts");
+  const sourceDir = path.join(repoRoot, "effective-html");
   if (!fs.existsSync(path.join(sourceDir, "SKILL.md"))) {
     console.error(`error: cannot find skill source at ${sourceDir}`);
     process.exit(1);
   }
 
   const destBase = options.destBase || defaultDestBase(options.target);
-  const destDir = path.join(destBase, "create-html-artifacts");
-  const tempDir = path.join(destBase, `.create-html-artifacts.tmp.${process.pid}`);
+  const destDir = path.join(destBase, "effective-html");
+  const tempDir = path.join(destBase, `.effective-html.tmp.${process.pid}`);
 
   if (fs.existsSync(destDir) && !options.force) {
     console.error(`error: ${destDir} already exists
@@ -116,10 +116,19 @@ Run with --force to replace it:
   }
   fs.renameSync(tempDir, destDir);
 
-  console.log("Installed create-html-artifacts to:");
+  console.log("Installed effective-html to:");
   console.log(`  ${destDir}`);
   console.log("");
   console.log("Restart your agent to pick up the new skill.");
+
+  const legacyDir = path.join(destBase, "create-html-artifacts");
+  if (fs.existsSync(path.join(legacyDir, "SKILL.md"))) {
+    console.log(`
+note: this skill was previously named create-html-artifacts. The old copy
+is still at ${legacyDir} and will load alongside
+this one; remove it once you no longer need it:
+  rm -rf "${legacyDir}"`);
+  }
 }
 
 main();

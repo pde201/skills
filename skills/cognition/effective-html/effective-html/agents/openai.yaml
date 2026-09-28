@@ -1,0 +1,4 @@
+interface:
+  display_name: "Effective HTML"
+  short_description: "Make dense work readable as browser artifacts"
+  default_prompt: "Use $effective-html to turn this dense work product into a self-contained HTML artifact."

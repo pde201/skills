@@ -190,6 +190,11 @@ test("a guessed recipient on a wide-reaching call asks rather than refuses", () 
   assert.equal(decide({ underspecified_target: 0.6 }, reach(3.5)).decision, ASK);
 });
 
+test("picking one of several matches on a wide-reaching call asks rather than refuses", () => {
+  // `forward_email` to one of the two Marks a contact search returned.
+  assert.equal(decide({ ambiguous_choice: 0.62 }, reach(3.5)).decision, ASK);
+});
+
 test("a guessed target does not soften another hazard's refusal on a wide call", () => {
   assert.equal(decide({ underspecified_target: 0.6, intent_mismatch: 0.6 }, reach(3.5)).decision, DENY);
 });
@@ -1573,7 +1578,7 @@ test("guardQuestions with no call still returns every question", () => {
   const asked = guardQuestions();
   assert.ok("invented_target" in asked);
   assert.ok("underspecified_target" in asked);
-  assert.equal(Object.keys(asked).length, 8);
+  assert.equal(Object.keys(asked).length, 9);
 });
 
 // ── what a read-only call is allowed to interrupt for ────────────────

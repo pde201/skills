@@ -23,7 +23,7 @@ import { shellSegments, readOnlyCommand, namesSecretFile } from "./shell.mjs";
 import { callSignature } from "./transcript.mjs";
 import { ALLOW, ASK, DENY, HAZARDS, BLAST_RADIUS_QUESTION, PHRASING } from "./guard-questions.mjs";
 import { deterministicCheck } from "./guard-local.mjs";
-import { workspaceRoots, changesOnlyInsideWorkspace, changesOnlyAgentOwned } from "./workspace.mjs";
+import { workspaceRoots, changesOnlyInsideWorkspace, changesOnlyAgentOwned, worksOnlyAgentLocal } from "./workspace.mjs";
 import { callProject } from "./project.mjs";
 import config from "./config.mjs";
 
@@ -109,6 +109,7 @@ export function guardQuestions(call, roots, recentCalls) {
     if (needsPath && call && !namesAPath(call.input)) continue;
     if (needsOutsideWorkspace && call && roots && changesOnlyInsideWorkspace(call, roots)) continue;
     if (id === "intent_mismatch" && call && changesOnlyAgentOwned(call)) continue;
+    if (id === "underspecified_target" && call && worksOnlyAgentLocal(call)) continue;
     questions[id] = question;
   }
   return questions;

@@ -151,5 +151,5 @@ export const PHRASING = {
   wrong_scope: "reaches outside the project unprompted",
   invented_target: "names a path that looks guessed",
   underspecified_target: "acts on a target nobody identified",
-  ambiguous_choice: "picks one of several matches the request did not tell apart",
+  ambiguous_choice: "acts on one or all of several matches the request did not tell apart",
 };

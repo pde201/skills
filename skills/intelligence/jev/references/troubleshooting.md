@@ -88,9 +88,12 @@ rather than raising `JEV_GUARD_ASK_AT`, which lowers every hazard at once.
 An `underspecified_target` ask means the call acts on a recipient, id,
 environment or broad set that neither the request nor an earlier result
 identified, for example an email to a bare first name or `git branch -D` over
-every branch for "the old branches". Answer with the exact target. Unlike other
-asks, it stays a question on a wide-reaching call rather than becoming a
-refusal. Read-only calls that list candidates are not interrupted.
+every branch for "the old branches". An `ambiguous_choice` ask means an earlier
+lookup returned several matching candidates, such as two contacts with the same
+name, and the call acts on one the request did not single out. Answer both
+with the exact target. Unlike other asks, these stay questions on a
+wide-reaching call rather than becoming refusals. Read-only calls that list
+candidates are not interrupted.
 
 For shell calls, `wrong_scope` stays in the question batch because a command
 may have effects beyond its named path. The judgment should still treat a new

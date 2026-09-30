@@ -184,6 +184,23 @@ test("wide reach turns a question into a refusal", () => {
   assert.equal(decision, DENY);
 });
 
+test("a guessed recipient on a wide-reaching call asks rather than refuses", () => {
+  // `send_email(to: "Dana")` for "send the report to Dana": the fix is the
+  // user naming Dana's address, and a refusal would only prompt another guess.
+  assert.equal(decide({ underspecified_target: 0.6 }, reach(3.5)).decision, ASK);
+});
+
+test("a guessed target does not soften another hazard's refusal on a wide call", () => {
+  assert.equal(decide({ underspecified_target: 0.6, intent_mismatch: 0.6 }, reach(3.5)).decision, DENY);
+});
+
+test("listing candidates for a vague target is not interrupted", () => {
+  // `git branch` for "delete the old branches" reads; it is how the target gets resolved.
+  const { decision, suppressed } = decide({ underspecified_target: 0.7 }, reach(0.2));
+  assert.equal(decision, ALLOW);
+  assert.equal(suppressed.underspecified_target, 0.7);
+});
+
 test("probabilities below the ask threshold are left alone", () => {
   const { decision, fired } = decide({ intent_mismatch: 0.44, invented_target: 0.44 }, reach(2));
   assert.equal(decision, ALLOW);
@@ -1555,7 +1572,8 @@ test("guardQuestions with no call still returns every question", () => {
   // unaffected rather than quietly losing a hazard.
   const asked = guardQuestions();
   assert.ok("invented_target" in asked);
-  assert.equal(Object.keys(asked).length, 7);
+  assert.ok("underspecified_target" in asked);
+  assert.equal(Object.keys(asked).length, 8);
 });
 
 // ── what a read-only call is allowed to interrupt for ────────────────

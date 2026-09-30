@@ -133,13 +133,13 @@ export function decide(probabilities, radius) {
   const fired = {};
 
   for (const [hazard, probability] of Object.entries(probabilities)) {
-    const { action, actsOnRead } = HAZARDS[hazard] ?? {};
+    const { action, actsOnRead, askEvenWhenWide } = HAZARDS[hazard] ?? {};
     if (!action) continue;
     let level = null;
     if (probability >= config.guardDenyAt) level = action;
     else if (probability >= config.guardAskAt) level = ASK;
     if (!level) continue;
-    triggered.push({ hazard, level, actsOnRead: Boolean(actsOnRead) });
+    triggered.push({ hazard, level, actsOnRead: Boolean(actsOnRead), askEvenWhenWide: Boolean(askEvenWhenWide) });
     fired[hazard] = probability;
   }
 
@@ -194,6 +194,8 @@ export function decide(probabilities, radius) {
   // Reach is a multiplier, not a hazard of its own: something already
   // suspicious that also touches shared state is not a question to wave
   // through, but a wide-reaching call that trips nothing is just a deploy.
+  // A hazard marked `askEvenWhenWide` is the exception: its fix is an answer
+  // from the user, which a refusal never asks for.
   const wideReaching = (radius?.score ?? 0) >= config.guardBlastRadiusBlock;
 
   // Just over the ask line, a judgment is a lean, not a finding: two thirds
@@ -205,10 +207,8 @@ export function decide(probabilities, radius) {
   const soft = triggered.length > 0 && !wideReaching && triggered.every((t) =>
     t.level === ASK && SOFTENABLE.has(t.hazard) && fired[t.hazard] < config.guardSoftUntil);
   if (soft) return { decision: ALLOW, fired: {}, advisory: { ...fired } };
-  const levels = triggered.map((t) => t.level);
-  const decision = wideReaching && levels.length
-    ? strictest(levels.map((d) => (d === ASK ? DENY : d)))
-    : strictest(levels);
+  const decision = strictest(triggered.map((t) =>
+    (wideReaching && t.level === ASK && !t.askEvenWhenWide ? DENY : t.level)));
 
   return { decision, fired };
 }

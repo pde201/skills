@@ -85,6 +85,13 @@ them the question is not asked at all and `signals.not_asked` says so. If a
 directory you work in keeps drawing asks, add it to `JEV_WORKSPACE_ROOTS`
 rather than raising `JEV_GUARD_ASK_AT`, which lowers every hazard at once.
 
+An `underspecified_target` ask means the call acts on a recipient, id,
+environment or broad set that neither the request nor an earlier result
+identified, for example an email to a bare first name or `git branch -D` over
+every branch for "the old branches". Answer with the exact target. Unlike other
+asks, it stays a question on a wide-reaching call rather than becoming a
+refusal. Read-only calls that list candidates are not interrupted.
+
 For shell calls, `wrong_scope` stays in the question batch because a command
 may have effects beyond its named path. The judgment should still treat a new
 sibling worktree of the current repository and routine Git preflight (`git

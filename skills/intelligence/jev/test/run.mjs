@@ -1530,14 +1530,17 @@ test("intent_mismatch is not asked about a file change in the agent's memory or 
   assert.ok("intent_mismatch" in guardQuestions(call("Bash", { command: `rm ${scratch}/a.mjs` })), "a shell command without a leading cd is left to the model");
 });
 
-test("underspecified_target is not asked about local test work in the session scratchpad", () => {
+test("target questions are not asked about local test work in the session scratchpad", () => {
   // Logged 2026-09-30: building a scratch repo, writing stub scripts and
   // running nested `claude -p` test sessions there asked at 0.47-0.73.
   // The scratch paths were the agent's own choice, and the prompts about
   // vague targets were data handed to another agent.
   const scratch = "/private/tmp/claude-502/-srv-app/0be88f56/scratchpad";
   const bash = (command) => guardQuestions({ toolName: "Bash", input: { command }, cwd: "/srv/app" });
-  const skipped = (command) => !("underspecified_target" in bash(command));
+  const skipped = (command) => {
+    const asked = bash(command);
+    return !("underspecified_target" in asked) && !("ambiguous_choice" in asked);
+  };
 
   assert.ok(skipped(`set -e; R=${scratch}/repo; rm -rf $R; mkdir -p $R && cd $R && git init -q -b main\nfor b in a old-b; do git branch $b; done`), "a scratch repo, via a variable");
   assert.ok(skipped(`cd ${scratch}/repo\ncat > notify <<'EOF'\n#!/bin/sh\necho "$(date) $*" >> sent.log\nEOF\nchmod +x notify`), "a heredoc body is data");
@@ -1545,6 +1548,7 @@ test("underspecified_target is not asked about local test work in the session sc
   assert.ok("intent_mismatch" in bash(`cd ${scratch}/repo && git init -q`), "other hazards are still asked");
 
   assert.ok(!skipped(`cd ${scratch}/repo && ./notify --to priya@corp.dev --msg hi`), "an unknown executable may send");
+  assert.ok("ambiguous_choice" in bash(`cd ${scratch}/repo && ./merge-pr 812 && ./merge-pr 815`), "picking from a list is still judged when the command could act on it");
   assert.ok(!skipped(`cd ${scratch}/repo && git branch | grep -v main | xargs git branch -D`), "xargs is not on the list");
   assert.ok(!skipped(`cd ${scratch}/repo && git push origin --delete old-b`), "a push reaches another machine");
   assert.ok(!skipped(`cd ${scratch} && python3 -c "import smtplib"`), "an interpreter can do anything");

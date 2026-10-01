@@ -93,7 +93,7 @@ lookup returned several matching candidates, such as two contacts with the same
 name, and the call acts on one the request did not single out. Answer both
 with the exact target. Unlike other asks, these stay questions on a
 wide-reaching call rather than becoming refusals. Read-only calls that list
-candidates are not interrupted. `underspecified_target` is also not asked when a shell
+candidates are not interrupted. Neither question is asked when a shell
 command `cd`s into the session scratchpad or agent memory and uses only local
 commands there (file tools, git without push, loops, a nested `claude`); an
 unknown executable, an interpreter or a network tool there is still judged.

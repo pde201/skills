@@ -6,9 +6,9 @@
 //  right?" is unanswerable without knowing what was asked for.
 // ──────────────────────────────────────────────────────────────────────
 
-import { readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 
 const MAX_BYTES = 4_000_000;
 const ANCHOR_BYTES = 500_000;
@@ -54,6 +54,18 @@ export function createTranscriptSnapshot(path) {
     calls: null,
     userActions: null,
   };
+}
+
+// A subagent's hook events carry the parent session's transcript_path, whose
+// latest request is the one that spawned the subagent, not the subagent's own
+// task. Claude Code keeps the subagent's transcript beside the parent's, as
+// <dir>/<session_id>/subagents/agent-<agent_id>.jsonl; use it when present.
+export function transcriptPathFor(event) {
+  const { transcript_path: path, session_id: sessionId, agent_id: agentId } = event ?? {};
+  if (!path || !agentId || !sessionId) return path;
+  if (!/^[\w-]+$/.test(agentId) || !/^[\w-]+$/.test(sessionId)) return path;
+  const subagentPath = join(dirname(path), sessionId, "subagents", `agent-${agentId}.jsonl`);
+  return existsSync(subagentPath) ? subagentPath : path;
 }
 
 const isTranscriptSnapshot = (value) => Boolean(value && value[SNAPSHOT_MARKER] === true);

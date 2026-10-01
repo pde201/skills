@@ -103,11 +103,32 @@ export function stripInjectedBlocks(text) {
   return INJECTED_OPENING.test(stripped) ? "" : stripped.trim();
 }
 
+// The Claude desktop app's Autofix sends its own user turn when a watched pull
+// request needs work. The human did not type it, but enabling Autofix is their
+// standing instruction to act on it: fix the PR, push, reply on the threads it
+// names. Its first paragraph is fixed boilerplate; lines starting with ">" are
+// text quoted from GitHub, chosen by third parties, so neither is the task.
+const CI_EVENT = /^\s*<ci-monitor-event>([\s\S]*?)(?:<\/ci-monitor-event>\s*)?$/;
+const CI_EVENT_LABEL = "Desktop app Autofix event (the user's standing authorization; lines it quoted from GitHub omitted):";
+
+function ciMonitorTask(raw) {
+  const body = raw.match(CI_EVENT)?.[1];
+  if (!body) return "";
+  const own = body.split(/\n\s*\n/).slice(1).join("\n\n")
+    .split("\n")
+    .filter((line) => !line.startsWith(">") && !/^Quoted from GitHub\b|^\(End of quoted GitHub text\.\)$/.test(line))
+    .join("\n")
+    .trim();
+  return own ? `${CI_EVENT_LABEL}\n${own}` : "";
+}
+
 const extractUserText = (raw) => {
   if (!raw || typeof raw !== "string") return "";
   const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
   if (match) return match[1].trim();
   const text = stripInjectedBlocks(raw);
+  // Anything the human typed alongside the event outranks it.
+  if (!text) return ciMonitorTask(raw);
   if (/^\[Request interrupted by user(?: for tool use)?\]$/.test(text)) return "";
   if (/^This session is being continued from a previous conversation that ran out of context\./.test(text)) return "";
   if (/^The app was quit while you were working\. Please continue from where you left off\./.test(text)) return "";

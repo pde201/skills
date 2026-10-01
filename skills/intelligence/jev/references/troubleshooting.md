@@ -74,6 +74,14 @@ repeatedly questions ordinary edits, check that this context captures the
 active task before changing the threshold. Decision logs record scores and
 reasons, not the full task text or independently verified labels.
 
+A Claude desktop app Autofix turn (`<ci-monitor-event>`) is the user's
+standing instruction, so it becomes the task: the app's own paragraphs and
+entry lines (`Comment N — comment_id=…`), labelled as an Autofix event. Its
+fixed opening paragraph and every `>` line quoted from GitHub are left out;
+review text is third-party data and never widens the task. Carry-forward
+briefs still drop the event. Without this, the guard judged the PR fix, its
+push and the thread replies against the last message the human typed.
+
 Read-only calls suppress most model hazards, but credential exposure and repeat
 failure remain relevant. Deterministic checks run before model judgments.
 Unknown or malformed model responses must not silently trim output.

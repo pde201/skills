@@ -20,7 +20,7 @@ import {
   checkGoalDriftAndThrashing,
   triageToolError,
 } from "../lib/supervision.mjs";
-import { createTranscriptSnapshot, transcriptContext } from "../lib/transcript.mjs";
+import { createTranscriptSnapshot, transcriptContext, transcriptPathFor } from "../lib/transcript.mjs";
 import { logDecision } from "../lib/log.mjs";
 import { createHash } from "node:crypto";
 import config from "../lib/config.mjs";
@@ -41,7 +41,8 @@ function callSummary(toolName, input) {
 // ── PreToolUse ───────────────────────────────────────────────────────
 
 async function preToolUse(event) {
-  const { tool_name: toolName, tool_input: input, cwd, transcript_path: transcriptPath } = event;
+  const { tool_name: toolName, tool_input: input, cwd } = event;
+  const transcriptPath = transcriptPathFor(event);
   const hookStarted = Date.now();
   const transcript = transcriptContext(createTranscriptSnapshot(transcriptPath));
   const { snapshot: transcriptSnapshot, task } = transcript;
@@ -146,7 +147,7 @@ async function postToolUse(event) {
   const started = Date.now();
   let result;
   try {
-    const task = transcriptContext(createTranscriptSnapshot(event.transcript_path)).task;
+    const task = transcriptContext(createTranscriptSnapshot(transcriptPathFor(event))).task;
     result = await slim(output, { task, command, minLines: config.slimMinLines, model: config.model });
   } catch {
     return nothing();

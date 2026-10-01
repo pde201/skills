@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ import {
   recentToolCalls,
   recentUserActions,
   transcriptContext,
+  transcriptPathFor,
   writtenDirs,
 } from "../lib/transcript.mjs";
 
@@ -94,6 +95,32 @@ test("a snapshot is stable after the transcript advances", () => {
 
     assert.equal(latestUserRequest(snapshot), "Keep the first request.");
     assert.equal(latestUserRequest(path), "Use the replacement request.");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a subagent's call reads the subagent's own transcript, not the parent's", () => {
+  const { dir, path } = fixture([{ type: "user", message: { role: "user", content: "Run it with a general-purpose agent." } }]);
+  const sessionId = "d042968f-c433-45fc-a8c1-27f62c8573d5";
+  const subagentDir = join(dir, sessionId, "subagents");
+  mkdirSync(subagentDir, { recursive: true });
+  const subagentPath = join(subagentDir, "agent-ae49b99f4b7bf9b44.jsonl");
+  writeFileSync(subagentPath, JSON.stringify({
+    type: "user",
+    isSidechain: true,
+    message: { role: "user", content: "Implement issue #7: the upload and image quality gate." },
+  }));
+  const event = { transcript_path: path, session_id: sessionId, agent_id: "ae49b99f4b7bf9b44" };
+
+  try {
+    assert.equal(transcriptPathFor(event), subagentPath);
+    assert.equal(latestUserRequest(transcriptPathFor(event)), "Implement issue #7: the upload and image quality gate.");
+    // The main session, a subagent with no transcript yet, and an id that
+    // would escape the directory all keep the parent transcript.
+    assert.equal(transcriptPathFor({ transcript_path: path, session_id: sessionId }), path);
+    assert.equal(transcriptPathFor({ ...event, agent_id: "missing" }), path);
+    assert.equal(transcriptPathFor({ ...event, agent_id: "../../x" }), path);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

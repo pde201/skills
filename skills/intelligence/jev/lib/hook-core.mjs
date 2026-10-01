@@ -99,5 +99,8 @@ export async function judge({ agent, tool, toolName, input, cwd, command, guarde
     cost_usd: verdict.cost,
     ...extra,
   });
+  if (config.guardShadow) {
+    return { decision: ALLOW, reason: verdict.reason, log: (extra = {}) => log({ shadow: true, ...extra }) };
+  }
   return { decision: verdict.decision, reason: verdict.reason, advisory: verdict.advisory, log };
 }

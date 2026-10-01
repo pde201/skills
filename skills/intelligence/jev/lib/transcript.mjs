@@ -122,6 +122,8 @@ function ciMonitorTask(raw) {
   return own ? `${CI_EVENT_LABEL}\n${own}` : "";
 }
 
+const STATUS_PING = /^(?:status|progress|done|finished|eta|any updates?|where are we|how(?:'s| is) it going|what(?:'s| is)? next)\s*[?.!]*$/i;
+
 const extractUserText = (raw) => {
   if (!raw || typeof raw !== "string") return "";
   const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
@@ -132,6 +134,8 @@ const extractUserText = (raw) => {
   if (/^\[Request interrupted by user(?: for tool use)?\]$/.test(text)) return "";
   if (/^This session is being continued from a previous conversation that ran out of context\./.test(text)) return "";
   if (/^The app was quit while you were working\. Please continue from where you left off\./.test(text)) return "";
+  // A check-in on running work is not a new task; the one it checks stays in force.
+  if (STATUS_PING.test(text)) return "";
   // Claude/Codex tool results arrive shaped as user turns; skip them
   if (text.startsWith("<") && !text.startsWith("<USER_REQUEST>")) return "";
   return text;
@@ -169,7 +173,13 @@ const PROPOSAL_QUESTION = /\b(?:do you want me(?: to)?|would you like me(?: to)?
 const PROPOSAL_ACTION = /\b(?:i['’]ll|i['’]d|i would|i can|i will|we can|we should|let me|switch|update|change|edit|add|remove|run|commit|push|regenerate|make|apply|implement|fix|keep|leave|park)\b/i;
 // A reply that picks from the assistant's numbered options: "1, 2 and 3",
 // "all", "both", "do 2", "implement all". Its meaning is the options it picks.
-const SELECTION = /^(?:(?:do|implement|take|apply|go with|run|build)\s+)?(?:all(?:\s+of\s+(?:them|these))?|both|#?\d{1,2}(?:\s*(?:,\s*and|,|and|&|\+)\s*#?\d{1,2})*)(?:,?\s*please)?[.!]?$/i;
+const SELECTION = /^(?:(?:do|implement|take|apply|go with|run|build)\s+)?(?:all(?:\s+of\s+(?:them|these))?|both|(?:options?\s+)?#?\d{1,2}(?:\s*(?:,\s*and|,|and|&|\+)\s*#?\d{1,2})*)(?:,?\s*please)?[.!]?$/i;
+// A short reply that points back at earlier work ("run it …", "finish the
+// threads", "check again …") means nothing on its own. A long message, or one
+// with no such pointer, is a request in its own right and stands alone.
+const REFERS_BACK = /\b(?:it|this|that|these|those|them|again|anyway|the rest)\b|^(?:\S+\s+){0,8}?(?:finish|complete|wrap up)\b/i;
+const MAX_REFERRING_CHARS = 120;
+const refersBack = (text) => text.length <= MAX_REFERRING_CHARS && REFERS_BACK.test(text);
 const OFFER_QUESTION = /\b(?:what would you like|which (?:of these|would you like|do you want))\b/i;
 const NUMBERED_OPTION = /^\s*(?:\d{1,2}[.)]|\|\s*\d{1,2}(?:\s*,\s*\d{1,2})*\s*\|)\s/gm;
 const isSelection = (text) => SELECTION.test(text.trim());
@@ -312,7 +322,7 @@ function baseTaskContext(path, { latestPrompt = "", maxChars = 2000 } = {}) {
   const latest = turns.at(-1);
   if (!latest) return "";
   const selection = isSelection(latest);
-  if (RESET_TASK.test(latest) || !(FOLLOWUP.test(latest) || selection)) return boundedText(latest, maxChars);
+  if (RESET_TASK.test(latest) || !(FOLLOWUP.test(latest) || selection || refersBack(latest))) return boundedText(latest, maxChars);
 
   const proposal = shortApproval(latest) || selection
     ? precedingAssistantProposal(entries, latestEntryIndex, { selection })

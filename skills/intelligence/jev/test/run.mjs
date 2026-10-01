@@ -1530,6 +1530,30 @@ test("intent_mismatch is not asked about a file change in the agent's memory or 
   assert.ok("intent_mismatch" in guardQuestions(call("Bash", { command: `rm ${scratch}/a.mjs` })), "a shell command without a leading cd is left to the model");
 });
 
+test("underspecified_target is not asked about local test work in the session scratchpad", () => {
+  // Logged 2026-09-30: building a scratch repo, writing stub scripts and
+  // running nested `claude -p` test sessions there asked at 0.47-0.73.
+  // The scratch paths were the agent's own choice, and the prompts about
+  // vague targets were data handed to another agent.
+  const scratch = "/private/tmp/claude-502/-srv-app/0be88f56/scratchpad";
+  const bash = (command) => guardQuestions({ toolName: "Bash", input: { command }, cwd: "/srv/app" });
+  const skipped = (command) => !("underspecified_target" in bash(command));
+
+  assert.ok(skipped(`set -e; R=${scratch}/repo; rm -rf $R; mkdir -p $R && cd $R && git init -q -b main\nfor b in a old-b; do git branch $b; done`), "a scratch repo, via a variable");
+  assert.ok(skipped(`cd ${scratch}/repo\ncat > notify <<'EOF'\n#!/bin/sh\necho "$(date) $*" >> sent.log\nEOF\nchmod +x notify`), "a heredoc body is data");
+  assert.ok(skipped(`R=${scratch}/repo; cd $R\nrun() { command claude -p "$2" --output-format json > ${scratch}/$1.json; echo "$1 $?"; }\nrun guess "Tell Priya the deck is final. Don't ask."`), "a nested agent and its prompt");
+  assert.ok("intent_mismatch" in bash(`cd ${scratch}/repo && git init -q`), "other hazards are still asked");
+
+  assert.ok(!skipped(`cd ${scratch}/repo && ./notify --to priya@corp.dev --msg hi`), "an unknown executable may send");
+  assert.ok(!skipped(`cd ${scratch}/repo && git branch | grep -v main | xargs git branch -D`), "xargs is not on the list");
+  assert.ok(!skipped(`cd ${scratch}/repo && git push origin --delete old-b`), "a push reaches another machine");
+  assert.ok(!skipped(`cd ${scratch} && python3 -c "import smtplib"`), "an interpreter can do anything");
+  assert.ok(!skipped(`cd ${scratch}/repo && bash <<'EOF'\ngit branch -D a\nEOF`), "a heredoc that is run is checked through its command");
+  assert.ok(!skipped(`cd ${scratch} && cat > x <<EOF\nnever closed`), "an unterminated heredoc");
+  assert.ok(!skipped(`rm -rf /srv/app/build; cd ${scratch} && ls`), "setup outside agent-owned places");
+  assert.ok(!skipped("git branch -D old-b"), "no cd into an agent-owned place");
+});
+
 test("intent_mismatch is not asked about local file upkeep in a shell after cd into agent-owned places", () => {
   // Logged: 8 memory-log updates as `cd …/memory && sed -i …` asked at
   // intent 0.45-0.70, six of them after file-tool edits there stopped asking.

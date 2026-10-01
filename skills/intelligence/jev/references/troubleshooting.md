@@ -74,6 +74,16 @@ repeatedly questions ordinary edits, check that this context captures the
 active task before changing the threshold. Decision logs record scores and
 reasons, not the full task text or independently verified labels.
 
+A short reply (120 characters or fewer) that points back at earlier work —
+“run it with …”, “finish the threads”, “check again and …”, “do option 1” —
+is a follow-up too. A status ping (“status”, “done?”, “what next?”) is not a
+task at all: the direction it checks on stays in force. On 2026-10-01 these
+shapes accounted for most asks that fired on a short task text; re-judging
+21 of them with the fuller task turned 5 interruptions into allows and none
+the other way. The rest were model judgment with full context, and 9 of the
+21 logged asks did not repeat on a second run, which is noise near the line
+rather than an extraction gap.
+
 A Claude desktop app Autofix turn (`<ci-monitor-event>`) is the user's
 standing instruction, so it becomes the task: the app's own paragraphs and
 entry lines (`Comment N — comment_id=…`), labelled as an Autofix event. Its
@@ -163,6 +173,14 @@ on calls that are not wide-reaching — proceed, and the concern is passed to th
 model as a note. Destruction and credential exposure are never softened. The
 evidence behind 0.55 is four labeled incidents (2026-09-25/26), not a
 calibration set; see below before making it a default.
+
+`JEV_GUARD_SHADOW=1` runs the guard without letting it act: every call is
+still judged and logged with the decision it would have made and
+`shadow: true`, but nothing is asked, blocked or noted. Use it when the guard
+interrupts too often to keep on, so false positives can still be counted and
+fixed. Git safety is a separate check and stays enforced. Shadow mode keeps
+the judgment's latency and cost; `JEV_HOOKS_GUARD=0` removes both but logs
+nothing to learn from.
 
 ## Tune from evidence
 

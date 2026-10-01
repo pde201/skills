@@ -68,6 +68,11 @@ export const config = {
   // the model instead. Off by default (equal to the ask line) until a labeled
   // set supports a value; 0.55 is the band the 2026-09-26 incidents sat in.
   guardSoftUntil: num("JEV_GUARD_SOFT_UNTIL", num("JEV_GUARD_ASK_AT", 0.45)),
+  // Shadow mode: the guard judges and logs every call (`shadow: true`, with
+  // the decision it would have made) but never asks, blocks or adds a note.
+  // For measuring false positives while the guard is off. Git safety is a
+  // separate check and stays enforced.
+  guardShadow: bool("JEV_GUARD_SHADOW", false),
 
   // Extra directories that count as the workspace for `wrong_scope`, on top
   // of the cwd, the host's workspace folders, the directories this session

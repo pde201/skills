@@ -104,12 +104,15 @@ function retriesAFailure(call, recentCalls) {
  */
 export function guardQuestions(call, roots, recentCalls) {
   const questions = { blast_radius: BLAST_RADIUS_QUESTION };
+  let agentLocal;
   for (const [id, { question, needsPath, needsOutsideWorkspace }] of Object.entries(HAZARDS)) {
     if (id === "repeat_failure" && call && !retriesAFailure(call, recentCalls)) continue;
     if (needsPath && call && !namesAPath(call.input)) continue;
     if (needsOutsideWorkspace && call && roots && changesOnlyInsideWorkspace(call, roots)) continue;
     if (id === "intent_mismatch" && call && changesOnlyAgentOwned(call)) continue;
-    if (id === "underspecified_target" && call && worksOnlyAgentLocal(call)) continue;
+    // A target the agent chose for its own scratch work is neither guessed nor
+    // picked from someone else's list; prompts it hands a nested agent there are data.
+    if ((id === "underspecified_target" || id === "ambiguous_choice") && call && (agentLocal ??= worksOnlyAgentLocal(call))) continue;
     questions[id] = question;
   }
   return questions;

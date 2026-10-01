@@ -94,11 +94,14 @@ const INJECTED_TAGS = [
 ];
 const INJECTED_BLOCK = new RegExp(`<(${INJECTED_TAGS.join("|")})>[\\s\\S]*?</\\1>`, "g");
 const INJECTED_OPENING = new RegExp(`^\\s*<(${INJECTED_TAGS.join("|")})>`);
+// An Autofix event quotes third-party text, which can contain its closing
+// tag; the event runs to the last one.
+const CI_EVENT_BLOCK = /<ci-monitor-event>[\s\S]*<\/ci-monitor-event>/g;
 
 /** Remove host-injected blocks from a user turn, leaving what the human wrote. */
 export function stripInjectedBlocks(text) {
   if (typeof text !== "string") return "";
-  const stripped = text.replace(INJECTED_BLOCK, "");
+  const stripped = text.replace(CI_EVENT_BLOCK, "").replace(INJECTED_BLOCK, "");
   // An unterminated block (truncated turn) still starts with its tag.
   return INJECTED_OPENING.test(stripped) ? "" : stripped.trim();
 }
@@ -122,6 +125,24 @@ function ciMonitorTask(raw) {
   return own ? `${CI_EVENT_LABEL}\n${own}` : "";
 }
 
+// A slash command or skill the human ran is recorded as a stub of tags, with
+// its expansion in a following meta entry. The command and its arguments are
+// what they asked for; host commands that only change the session are not.
+const COMMAND_NAME = /<command-name>\/?([^<\s]+)<\/command-name>/;
+const COMMAND_ARGS = /<command-args>([\s\S]*?)<\/command-args>/;
+const HOST_COMMANDS = new Set([
+  "model", "mcp", "compact", "clear", "login", "logout", "config", "cost", "usage", "help",
+  "status", "resume", "permissions", "doctor", "hooks", "memory", "fast", "effort", "theme",
+  "exit", "context", "agents", "plugin", "plugins", "ide", "vim", "statusline", "reload-skills",
+]);
+
+function commandTask(raw) {
+  const name = raw.match(COMMAND_NAME)?.[1];
+  if (!name || HOST_COMMANDS.has(name)) return "";
+  const args = raw.match(COMMAND_ARGS)?.[1]?.trim();
+  return args ? `/${name} ${args}` : `/${name}`;
+}
+
 const STATUS_PING = /^(?:status|progress|done|finished|eta|any updates?|where are we|how(?:'s| is) it going|what(?:'s| is)? next)\s*[?.!]*$/i;
 
 const extractUserText = (raw) => {
@@ -129,8 +150,8 @@ const extractUserText = (raw) => {
   const match = raw.match(/<USER_REQUEST>([\s\S]*?)<\/USER_REQUEST>/);
   if (match) return match[1].trim();
   const text = stripInjectedBlocks(raw);
-  // Anything the human typed alongside the event outranks it.
-  if (!text) return ciMonitorTask(raw);
+  // Anything the human typed alongside the event or command outranks it.
+  if (!text) return ciMonitorTask(raw) || commandTask(raw);
   if (/^\[Request interrupted by user(?: for tool use)?\]$/.test(text)) return "";
   if (/^This session is being continued from a previous conversation that ran out of context\./.test(text)) return "";
   if (/^The app was quit while you were working\. Please continue from where you left off\./.test(text)) return "";
@@ -141,21 +162,32 @@ const extractUserText = (raw) => {
   return text;
 };
 
+// Claude Code records a message typed while the agent works as a
+// queued_command attachment, not a user entry.
+const isQueuedHuman = (entry) =>
+  entry?.type === "attachment" && entry.attachment?.type === "queued_command" && entry.attachment.origin?.kind === "human";
+
 const isUserTurn = (entry) =>
   entry?.isMeta !== true && (
     entry?.type === "user" ||
     entry?.role === "user" ||
     entry?.message?.role === "user" ||
     entry?.type === "USER_INPUT" ||
-    entry?.source === "USER_EXPLICIT"
+    entry?.source === "USER_EXPLICIT" ||
+    isQueuedHuman(entry)
   );
+
+/** The raw text of a turn, wherever the host keeps it. */
+const turnText = (entry) => isQueuedHuman(entry)
+  ? textOf(entry.attachment.prompt)
+  : textOf(entry?.message?.content ?? entry?.content);
 
 /** The most recent thing the human actually asked for. */
 export function latestUserRequest(path, { maxChars = 1500 } = {}) {
   const entries = entriesFor(path);
   for (let i = entries.length - 1; i >= 0; i--) {
     if (!isUserTurn(entries[i])) continue;
-    const raw = textOf(entries[i].message?.content ?? entries[i].content);
+    const raw = turnText(entries[i]);
     const text = extractUserText(raw);
     if (!text) continue;
     return text.slice(0, maxChars);
@@ -241,7 +273,7 @@ function precedingAssistantProposal(entries, latestEntryIndex, { selection = fal
     const entry = entries[index];
     // Tool results are encoded as user turns by Claude. Only a new human
     // direction can supersede the proposal the short reply refers to.
-    if (isUserTurn(entry) && extractUserText(textOf(entry.message?.content ?? entry.content))) break;
+    if (isUserTurn(entry) && extractUserText(turnText(entry))) break;
     if (!isAssistantTurn(entry)) continue;
     const text = assistantText(entry);
     if (!text) continue;
@@ -273,7 +305,7 @@ export function userAnswersSinceLatestTurn(path) {
   const entries = entriesFor(path);
   let latest = -1;
   for (let i = entries.length - 1; i >= 0; i--) {
-    if (isUserTurn(entries[i]) && extractUserText(textOf(entries[i].message?.content ?? entries[i].content))) { latest = i; break; }
+    if (isUserTurn(entries[i]) && extractUserText(turnText(entries[i]))) { latest = i; break; }
   }
   const questionIds = new Set();
   const answers = [];
@@ -309,7 +341,7 @@ function baseTaskContext(path, { latestPrompt = "", maxChars = 2000 } = {}) {
   for (let index = 0; index < entries.length; index++) {
     const entry = entries[index];
     if (!isUserTurn(entry)) continue;
-    const text = extractUserText(textOf(entry.message?.content ?? entry.content));
+    const text = extractUserText(turnText(entry));
     if (!text) continue;
     turns.push(text);
     latestEntryIndex = index;
@@ -429,7 +461,7 @@ function parseToolCalls(entries) {
   // turn is not judged a blind repeat.
   let humanTurns = 0;
   for (const entry of entries) {
-    if (isUserTurn(entry) && extractUserText(textOf(entry.message?.content ?? entry.content))) humanTurns++;
+    if (isUserTurn(entry) && extractUserText(turnText(entry))) humanTurns++;
     // Claude Code / Codex format
     const content = entry?.message?.content ?? entry?.content;
     if (Array.isArray(content)) {
@@ -536,7 +568,7 @@ export function writtenDirs(path) {
     // summarizeInput hands back file_path / TargetFile for these tools.
     if (typeof call.input === "string" && /^(\/|~)/.test(call.input)) dirs.add(dirname(call.input));
   }
-  return [...dirs].slice(0, 50);
+  return [...dirs].slice(-50);
 }
 
 /** Every file path this session has successfully touched — used to spot invented paths. */
@@ -549,7 +581,7 @@ export function observedPaths(path) {
     for (const m of match ?? []) seen.add(m.trim());
     if (/^\/|^\.\//.test(call.input)) seen.add(call.input);
   }
-  return [...seen].slice(0, 200);
+  return [...seen].slice(-200);
 }
 
 /**

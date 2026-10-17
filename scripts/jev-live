@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Run jev's live check against the real API.
+#
+#   scripts/jev-live [node-args...]     e.g. scripts/jev-live  (runs test/live.mjs)
+#
+# Uses TYPESAFE_API_KEY when set; otherwise reads it from 1Password at
+# $TYPESAFE_OP_PATH (default op://Private/TYPESAFE_API_KEY/credential). If op
+# is not signed in, run `eval "$(op signin)"` once in your own shell first.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+if [[ -z "${TYPESAFE_API_KEY:-}" ]]; then
+  TYPESAFE_API_KEY="$(op read "${TYPESAFE_OP_PATH:-op://Private/TYPESAFE_API_KEY/credential}" 2>/dev/null)" || {
+    echo "TYPESAFE_API_KEY is unset and op is not signed in. In your shell: eval \"\$(op signin)\", then rerun." >&2
+    exit 1
+  }
+  export TYPESAFE_API_KEY
+fi
+
+# A throwaway state dir keeps the live run out of the real jev log.
+JEV_STATE_DIR="$(mktemp -d)"
+export JEV_STATE_DIR
+cd "$root/skills/intelligence/jev"
+exec node test/live.mjs "$@"

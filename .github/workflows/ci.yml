@@ -22,21 +22,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: ${{ matrix.node }}
-      - name: jev offline suite
-        working-directory: skills/intelligence/jev
-        run: npm test
-      - name: jev eval scorer
-        working-directory: skills/intelligence/jev
-        run: npm run eval:self-test
-      - name: prd-lifecycle
-        working-directory: skills/workflow/prd-lifecycle
-        run: npm test
-      - name: browse offline suite
-        working-directory: skills/intelligence/browse
-        run: npm test
-      - name: ssd tracker
-        working-directory: skills/intelligence/ssd
-        run: npm test
+      - run: scripts/check node
 
   skills:
     name: Skill metadata and samples
@@ -47,20 +33,7 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install pyyaml
-      - name: SKILL.md frontmatter and install instructions
-        run: python .github/scripts/check-skills.py
-      - name: effective-html checker tests
-        working-directory: skills/cognition/effective-html
-        run: python -m unittest discover -s tests -v
-      - name: effective-html samples are up to date
-        working-directory: skills/cognition/effective-html
-        run: python samples/build-samples.py --check
-      - name: effective-html samples pass the artifact checker
-        working-directory: skills/cognition/effective-html
-        run: |
-          for f in samples/*.html; do
-            python effective-html/scripts/check-html-artifact.py "$f"
-          done
+      - run: scripts/check skills
 
   installers:
     name: Installers
@@ -70,30 +43,4 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      - name: Shell scripts parse
-        run: git ls-files '*.sh' | xargs -n1 bash -n
-      - name: Root installer installs every skill
-        run: |
-          dest="$RUNNER_TEMP/skills"
-          for skill in $(./install.sh --list); do
-            ./install.sh "$skill" --dest "$dest"
-            test -f "$dest/$skill/SKILL.md"
-            if ./install.sh "$skill" --dest "$dest" 2>/dev/null; then
-              echo "reinstalling $skill without --force should fail"; exit 1
-            fi
-            ./install.sh "$skill" --dest "$dest" --force
-          done
-          if ./install.sh jev --dest "$dest" 2>/dev/null; then
-            echo "jev should be refused by the root installer"; exit 1
-          fi
-      - name: browse installer
-        run: |
-          skills/intelligence/browse/install.sh --dest "$RUNNER_TEMP/browse-sh"
-          test -f "$RUNNER_TEMP/browse-sh/browse/SKILL.md"
-          test -x "$RUNNER_TEMP/browse-sh/browse/scripts/browse.mjs"
-      - name: jev copy installers
-        run: |
-          skills/intelligence/jev/install-skill.sh --dest "$RUNNER_TEMP/jev-sh"
-          test -f "$RUNNER_TEMP/jev-sh/jev/SKILL.md"
-          node skills/intelligence/jev/bin/install.js --dest "$RUNNER_TEMP/jev-js"
-          test -f "$RUNNER_TEMP/jev-js/jev/SKILL.md"
+      - run: scripts/check installers

@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Summarise what the installed jev hooks decided since the skill was installed.
+#
+#   scripts/jev-log [since-ISO-time]     default: install time of the skill
+#
+# Prints PreToolUse decisions by deciding party, then every ask or deny with
+# the call and the reason.
+set -euo pipefail
+
+log="${JEV_STATE_DIR:-$HOME/.local/state/jev-hooks}/jev-log.jsonl"
+installed="${CLAUDE_HOME:-$HOME/.claude}/skills/jev/lib/workspace.mjs"
+since="${1:-$(date -u -r "$installed" +%Y-%m-%dT%H:%M:%S)}"
+
+echo "since (UTC): $since   now (UTC): $(date -u +%Y-%m-%dT%H:%M:%S)"
+echo "--- PreToolUse decisions"
+jq -r --arg s "$since" 'select(.hook=="PreToolUse" and .at >= $s) | "\(.decision) by=\(.by)"' "$log" | sort | uniq -c
+echo "--- asks and denies"
+jq -r --arg s "$since" '
+  select(.hook=="PreToolUse" and .at >= $s and (.decision=="ask" or .decision=="deny"))
+  | "\(.at[11:19]) \(.decision) \(.tool) u=\(.probabilities.underspecified_target // "-") amb=\(.probabilities.ambiguous_choice // "-")\n    \((.call // "") | gsub("\n";" ") | .[0:130])\n    \((.reason // "") | sub("Jev (approval request|blocked call) \\((model estimate|local check)\\): ";"") | .[0:120])"' "$log"

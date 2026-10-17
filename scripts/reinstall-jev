@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# Refresh the installed jev skill from this checkout, keeping a rollback copy.
+#
+#   scripts/reinstall-jev <label>
+#
+# <label> names the change (e.g. ambiguous-local-skip). The prior install is
+# copied to ~/.local/state/jev-hooks/rollback/jev-before-<label>-<date>, then
+# install-skill.sh replaces it and the result is diffed against the checkout.
+# CLAUDE_HOME relocates the install, as it does for install-skill.sh.
+set -euo pipefail
+
+label="${1:?usage: scripts/reinstall-jev <label>}"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+jev="$root/skills/intelligence/jev"
+installed="${CLAUDE_HOME:-$HOME/.claude}/skills/jev"
+
+echo "checkout: $(git -C "$root" branch --show-current) $(git -C "$root" log --oneline -1)"
+
+if [[ -d "$installed" ]]; then
+  backup="${JEV_ROLLBACK_DIR:-$HOME/.local/state/jev-hooks/rollback}/jev-before-$label-$(date +%F)"
+  mkdir -p "$(dirname "$backup")"
+  cp -Rp "$installed" "$backup"
+  echo "backup: $backup"
+fi
+
+"$jev/install-skill.sh" claude --force >/dev/null
+
+# The installer rewrites bin/install.js to point at the installed copy.
+if diff -rq "$jev" "$installed" | grep -v 'install\.js'; then
+  echo "installed copy differs from checkout" >&2
+  exit 1
+fi
+echo "installed copy matches checkout"

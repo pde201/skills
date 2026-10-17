@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Run the repository's checks. CI calls this script with a group name, so
+# the commands here are the only copy.
+#
+#   scripts/check            every group
+#   scripts/check node       skill test suites (needs Node 18+; jq for jev)
+#   scripts/check skills     metadata and effective-html (needs python3 + pyyaml)
+#   scripts/check installers installer scripts (needs bash, node)
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$root"
+
+run() {
+  echo "▶ $*"
+  "$@"
+}
+
+in_dir() {
+  local dir="$1"
+  shift
+  echo "▶ ($dir) $*"
+  (cd "$dir" && "$@")
+}
+
+check_node() {
+  in_dir skills/intelligence/jev npm test
+  in_dir skills/intelligence/jev npm run eval:self-test
+  in_dir skills/workflow/prd-lifecycle npm test
+  in_dir skills/intelligence/browse npm test
+  in_dir skills/intelligence/ssd npm test
+}
+
+check_skills() {
+  local py=python3
+  if ! python3 -c 'import yaml' 2>/dev/null; then
+    # No pyyaml on this machine: keep a throwaway venv inside .git.
+    py="$root/.git/check-venv/bin/python"
+    [[ -x "$py" ]] || {
+      python3 -m venv "$root/.git/check-venv"
+      "$py" -m pip install -q pyyaml
+    }
+  fi
+  run "$py" .github/scripts/check-skills.py
+  in_dir skills/cognition/effective-html "$py" -m unittest discover -s tests -v
+  in_dir skills/cognition/effective-html "$py" samples/build-samples.py --check
+  for f in skills/cognition/effective-html/samples/*.html; do
+    run "$py" skills/cognition/effective-html/effective-html/scripts/check-html-artifact.py "$f"
+  done
+}
+
+check_installers() {
+  local tmp
+  tmp="$(mktemp -d)"
+  trap 'rm -rf "$tmp"' RETURN
+
+  echo "▶ shell scripts parse"
+  git ls-files '*.sh' scripts/check .githooks | xargs -n1 bash -n
+
+  echo "▶ root installer installs every skill"
+  local dest="$tmp/skills" skill
+  for skill in $(./install.sh --list); do
+    ./install.sh "$skill" --dest "$dest"
+    test -f "$dest/$skill/SKILL.md"
+    if ./install.sh "$skill" --dest "$dest" 2>/dev/null; then
+      echo "reinstalling $skill without --force should fail" >&2
+      exit 1
+    fi
+    ./install.sh "$skill" --dest "$dest" --force
+  done
+  if ./install.sh jev --dest "$dest" 2>/dev/null; then
+    echo "jev should be refused by the root installer" >&2
+    exit 1
+  fi
+
+  echo "▶ browse installer"
+  skills/intelligence/browse/install.sh --dest "$tmp/browse-sh"
+  test -f "$tmp/browse-sh/browse/SKILL.md"
+  test -x "$tmp/browse-sh/browse/scripts/browse.mjs"
+
+  echo "▶ jev copy installers"
+  skills/intelligence/jev/install-skill.sh --dest "$tmp/jev-sh"
+  test -f "$tmp/jev-sh/jev/SKILL.md"
+  node skills/intelligence/jev/bin/install.js --dest "$tmp/jev-js"
+  test -f "$tmp/jev-js/jev/SKILL.md"
+}
+
+case "${1:-all}" in
+  node) check_node ;;
+  skills) check_skills ;;
+  installers) check_installers ;;
+  all) check_node; check_skills; check_installers ;;
+  *) echo "usage: scripts/check [node|skills|installers|all]" >&2; exit 2 ;;
+esac
+echo "✓ checks passed"
